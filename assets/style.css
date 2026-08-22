@@ -1,0 +1,128 @@
+/* 部位站配色：墨紫深色主題。
+   刻意與美國總經手冊（藍灰 --bg:#0E1116）和澳洲手冊（暖褐 --bg:#14120E）區隔——
+   三個站常同時開著，底色一眼就要能分辨自己在看哪一個。 */
+:root{
+  --bg:#12101A; --card:#1B1826; --card2:#232032; --border:#332E45;
+  --text:#EAE7F2; --text2:#A9A3BC; --text3:#78728C;
+
+  /* 債市多空：比照台股紅漲綠跌，以「債券價格」為準——
+     利多債市＝債價上漲（殖利率下行）＝紅，利空債市＝債價下跌＝綠。
+     這組語義與另外兩個站一致，不因換配色而改動。
+     用在部位上：淨多期貨＝押債價漲＝紅；淨空＝押債價跌＝綠。 */
+  --bull:#E06C5A; --bear:#4FBF8B;
+
+  /* 五類交易人各一色，只用於區分身分，不帶多空含義 */
+  --c-dealer:#5B7FC7; --c-asset:#C9913A; --c-lev:#9B6FC4;
+  --c-other:#4A9AA5; --c-nonrept:#7C7590;
+
+  --warn:#D9A441;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);
+  font-family:-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  line-height:1.55;padding:16px;max-width:1180px;margin:0 auto}
+
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+h1{font-size:22px;font-weight:700}
+.sub{color:var(--text2);font-size:13px;margin-top:3px}
+h2{font-size:15px;color:var(--text2);font-weight:600;margin:26px 0 4px;letter-spacing:.5px}
+h2 .n{color:var(--text3);font-weight:500;margin-right:7px}
+.note{font-size:12px;color:var(--text3);margin-bottom:11px}
+
+.statusbar{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.stat{background:var(--card2);border:1px solid var(--border);color:var(--text2);
+  font-size:12px;padding:6px 11px;border-radius:8px;white-space:nowrap}
+.stat b{color:var(--text);font-weight:600}
+.stat.warn{border-color:var(--warn);color:var(--warn)}
+
+/* 合約切換 */
+/* 單列橫向捲動而不是 wrap：這一排是 sticky 的，若在窄螢幕折成六行，
+   會把整個視窗上半部吃掉，下面的內容就沒得看了。 */
+.chips{display:flex;gap:7px;flex-wrap:nowrap;overflow-x:auto;margin:14px 0 4px;
+  position:sticky;top:0;background:var(--bg);padding:9px 0;z-index:5;
+  border-bottom:1px solid var(--border);scrollbar-width:thin}
+.chip{border:1px solid var(--border);background:var(--card);color:var(--text2);font-size:13px;
+  padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.chip:hover{color:var(--text);border-color:var(--text3)}
+.chip.on{background:var(--card2);color:var(--text);border-color:var(--text2)}
+.chip .sm{color:var(--text3);font-size:11px;margin-left:5px}
+.chip.on .sm{color:var(--text2)}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:14px 16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}}
+
+/* ── M1 部位結構：五類交易人的多空對比條 ───────────────── */
+.posrow{display:grid;grid-template-columns:112px minmax(0,1fr) 128px;gap:12px;align-items:center;
+  padding:9px 0;border-bottom:1px solid var(--border);
+  grid-template-areas:"who bar num"}
+.posrow .who{grid-area:who} .posrow .bar{grid-area:bar} .posrow .num{grid-area:num}
+.posrow:last-child{border-bottom:none}
+.posrow .who{font-size:13px;display:flex;align-items:center;gap:7px}
+.posrow .who i{width:3px;height:15px;border-radius:2px;flex:none;font-style:normal}
+.posrow .who .en{display:block;color:var(--text3);font-size:10.5px;line-height:1.2}
+
+/* 中線對齊的雙向長條：左空右多，中間為零 */
+.bar{position:relative;height:20px;background:var(--card2);border-radius:4px;overflow:hidden}
+.bar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--border);z-index:2}
+.bar .s{position:absolute;top:2px;bottom:2px;right:50%;background:var(--bear);border-radius:3px 0 0 3px}
+.bar .l{position:absolute;top:2px;bottom:2px;left:50%;background:var(--bull);border-radius:0 3px 3px 0}
+.posrow .num{text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+.posrow .num .pct{display:block;color:var(--text3);font-size:11px}
+.bull{color:var(--bull)} .bear{color:var(--bear)} .dim{color:var(--text3)}
+
+/* ── M2 本週變化排行 ─────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:right;color:var(--text3);font-weight:500;font-size:11.5px;
+  padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th.l,td.l{text-align:left}
+td{padding:7px 8px;border-bottom:1px solid var(--border);
+  font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--card2)}
+.tag{font-size:11px;padding:2px 7px;border-radius:4px;border:1px solid currentColor}
+
+/* ── M3 極端度尺規 ──────────────────────────────────── */
+.gauge{position:relative;height:8px;background:linear-gradient(90deg,
+  var(--bear) 0%, var(--card2) 45%, var(--card2) 55%, var(--bull) 100%);
+  border-radius:4px;opacity:.85}
+.gauge .pin{position:absolute;top:-4px;width:2px;height:16px;background:var(--text);border-radius:1px}
+.gaugerow{display:grid;grid-template-columns:112px minmax(0,1fr) 96px;gap:12px;align-items:center;
+  padding:10px 0;border-bottom:1px solid var(--border);
+  grid-template-areas:"who gauge num"}
+.gaugerow .who{grid-area:who} .gaugerow .gauge{grid-area:gauge} .gaugerow .num{grid-area:num}
+.gaugerow:last-child{border-bottom:none}
+
+/* 窄螢幕：固定欄位（112px＋96/128px＋間距）會把中間的 1fr 擠成 0 寬，
+   長條與尺規就整條消失。實測 wmux 側邊面板內容寬只有 275px，正好踩中。
+   這裡改成標籤與數字同一行、長條獨佔下一行，寬度就回來了。 */
+@media(max-width:680px){
+  /* 標籤欄用 auto 而不是 1fr：中文名設了 nowrap，若欄位可被壓到 0
+     文字會直接溢出蓋在數字上。auto 讓欄寬跟著內容走，剩餘寬度全給數字。 */
+  .posrow,.gaugerow{grid-template-columns:auto minmax(0,1fr);gap:5px 10px;
+    grid-template-areas:"who num" "bar bar"}
+  .gaugerow{grid-template-areas:"who num" "gauge gauge"}
+  .posrow .num,.gaugerow .num{text-align:right}
+  /* 窄螢幕沒有空間讓「槓桿基金」斷成「槓桿基／金」——中文名不折行，
+     英文全名直接收起來（中文已足以辨識，英文是給對照 CFTC 原始報告用的）。 */
+  .posrow .who{white-space:nowrap}
+  .posrow .who .en{display:none}
+}
+.gaugerow .num{text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+.gaugerow .num .z{display:block;color:var(--text3);font-size:11px}
+
+/* ── 圖表 ───────────────────────────────────────────── */
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart .axis{stroke:var(--border);stroke-width:1}
+.chart .zero{stroke:var(--text3);stroke-width:1;stroke-dasharray:3 3}
+.chart text{fill:var(--text3);font-size:10px;font-family:inherit}
+.chart .lbl{fill:var(--text2);font-size:11px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--text2);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:2.5px;border-radius:2px;margin-right:5px;
+  vertical-align:middle;font-style:normal}
+
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--border);
+  color:var(--text3);font-size:11.5px;line-height:1.7}
+footer a{color:var(--text2)}
+.scroll{overflow-x:auto}

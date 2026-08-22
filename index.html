@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>美債部位與波動追蹤</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2312101A'/><path d='M5 24 L5 16 M12 24 L12 9 M19 24 L19 19 M26 24 L26 6' stroke='%23C9913A' stroke-width='3.4' fill='none' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  /* 密碼閘門：未解鎖前整頁不顯示（gate.js 驗證通過後移除 .locked） */
+  html.locked body > *{visibility:hidden}
+  html.locked #gate{visibility:visible}
+  #gate{position:fixed;inset:0;z-index:99;background:var(--bg);
+    display:flex;align-items:center;justify-content:center;padding:24px}
+  #gate form{width:100%;max-width:320px;background:var(--card);border:1px solid var(--border);
+    border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:10px}
+  .gate-title{font-size:16px;font-weight:600}
+  .gate-sub{font-size:12.5px;color:var(--text3);margin-bottom:4px}
+  #gatepw{background:var(--card2);border:1px solid var(--border);border-radius:8px;
+    color:var(--text);padding:10px 12px;font-size:15px;min-height:42px;font-family:inherit}
+  .btn{background:var(--card2);border:1px solid var(--border);color:var(--text2);
+    font-size:13px;padding:9px 14px;border-radius:8px;cursor:pointer;min-height:40px;
+    font-family:inherit;display:inline-flex;align-items:center;justify-content:center}
+  .btn:hover{color:var(--text);border-color:var(--text3)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn-primary{color:var(--text);border-color:var(--c-asset)}
+  .gate-msg{font-size:12px;color:var(--bear);min-height:16px}
+</style>
+<script>document.documentElement.className='locked';</script>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>美債部位與波動追蹤</h1>
+    <div class="sub">CFTC 期貨＋選擇權合併部位 ‧ 六檔美債合約 ‧ 五類交易人</div>
+  </div>
+  <div class="statusbar" id="status"></div>
+</header>
+
+<div class="chips" id="chips"></div>
+
+<h2><span class="n">M1</span>部位結構</h2>
+<div class="note" id="m1note"></div>
+<div class="card" id="m1"></div>
+
+<h2><span class="n">M2</span>本週誰在加倉</h2>
+<div class="note">依「淨部位變化」的絕對值排序，六檔 × 五類全部納入。
+  多方變化與空方變化分開列——同樣是淨部位轉多，「新增多單」和「空單回補」的意義完全不同。</div>
+<div class="card scroll" id="m2"></div>
+
+<h2><span class="n">M3</span>部位極端度</h2>
+<div class="note" id="m3note"></div>
+<div class="grid2">
+  <div class="card" id="m3gauges"></div>
+  <div class="card" id="m3chart"></div>
+</div>
+
+<h2><span class="n">M4</span>已實現波動</h2>
+<div class="note">殖利率日變動的滾動標準差，年化後以 bp 表示。
+  這是<b>已實現</b>波動，不是選擇權隱含波動——它講的是市場已經走過什麼，不是市場預期什麼。</div>
+<div class="card" id="m4"></div>
+
+<footer>
+  <div id="srcline"></div>
+  <div>部位資料：CFTC Commitments of Traders — Traders in Financial Futures（期貨＋選擇權合併版）。
+    合併版把選擇權部位以 delta 加權併入，故本站的「部位」已包含選擇權的方向性曝險。</div>
+  <div>殖利率：FRED（DGS2 / DGS5 / DGS10 / DGS30），原始資料為美國財政部 CMT 殖利率。</div>
+  <div>兩者皆為美國聯邦政府公開資料。本頁僅供參考，不構成投資建議。</div>
+</footer>
+
+<!-- gate.js 驗證通過後才會載入 assets/app.js -->
+<script src="assets/gate.js"></script>
+</body>
+</html>

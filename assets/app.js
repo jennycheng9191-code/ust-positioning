@@ -1,0 +1,243 @@
+/* 美債部位與波動追蹤 — 前端渲染。
+   不引任何外部圖表庫：資料量小、圖形單純，inline SVG 自己畫就夠，
+   也省掉一個離線／CSP 會壞掉的相依。 */
+'use strict';
+
+const CAT_COLOR = {
+  dealer: 'var(--c-dealer)', asset_mgr: 'var(--c-asset)', lev_money: 'var(--c-lev)',
+  other_rept: 'var(--c-other)', nonrept: 'var(--c-nonrept)'
+};
+
+let DATA = null;
+let current = 'ust10y';
+
+const $ = id => document.getElementById(id);
+const num = n => (n === null || n === undefined) ? '—' : n.toLocaleString('en-US');
+const signed = n => (n === null || n === undefined) ? '—' : (n > 0 ? '+' : '') + n.toLocaleString('en-US');
+const wan = n => (n === null || n === undefined) ? '—'
+  : (Math.abs(n) >= 10000 ? (n / 10000).toFixed(1) + ' 萬' : n.toLocaleString('en-US'));
+// 淨多＝押債價漲＝利多債市＝紅；淨空＝綠。與另外兩個站的語義一致。
+const dir = n => n > 0 ? 'bull' : (n < 0 ? 'bear' : 'dim');
+
+function fmtDate(s) {
+  const d = new Date(s + 'T00:00:00');
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/* ── 狀態列 ──────────────────────────────────────────── */
+function renderStatus() {
+  const m = DATA.meta;
+  const age = Math.round((Date.now() - new Date(m.report_date + 'T00:00:00')) / 86400000);
+  const stale = age > 14;
+  $('status').innerHTML = `
+    <div class="stat">部位日期 <b>${m.report_date}</b>（週二收盤）</div>
+    <div class="stat${stale ? ' warn' : ''}">${stale ? '⚠ 資料可能過期' : '下期預定'} <b>${m.next_release}</b></div>`;
+  $('srcline').textContent = `本期部位為 ${m.report_date}（週二）收盤，於當週五 15:30 ET 公布；`
+    + `殖利率與波動度資料涵蓋至 ${m.yield_date}。`;
+}
+
+/* ── 合約切換 ────────────────────────────────────────── */
+function renderChips() {
+  $('chips').innerHTML = DATA.contracts.map(c => {
+    const oi = DATA.latest[c.key].oi;
+    return `<button class="chip${c.key === current ? ' on' : ''}" data-k="${c.key}">
+      ${c.zh}<span class="sm">OI ${wan(oi)}</span></button>`;
+  }).join('');
+  $('chips').querySelectorAll('.chip').forEach(b =>
+    b.onclick = () => { current = b.dataset.k; render(); });
+}
+
+/* ── M1 部位結構 ─────────────────────────────────────── */
+function renderM1() {
+  const row = DATA.latest[current];
+  const c = DATA.contracts.find(x => x.key === current);
+  $('m1note').innerHTML = `${c.zh}合約，未平倉量 <b>${num(row.oi)}</b> 口，
+    週變化 <span class="${dir(row.oi_chg)}">${signed(row.oi_chg)}</span>${row.units ? '，' + row.units : ''}。
+    左綠為空方、右紅為多方，長度以同一把尺；價差（spread）部位是同時持有多空的套利腿，不計入淨額。`;
+
+  const scale = Math.max(...DATA.categories.map(cat => {
+    const v = row.cats[cat.key];
+    return Math.max(v.long || 0, v.short || 0);
+  }));
+
+  $('m1').innerHTML = DATA.categories.map(cat => {
+    const v = row.cats[cat.key];
+    const lw = 50 * (v.long || 0) / scale, sw = 50 * (v.short || 0) / scale;
+    const pctOI = row.oi ? (100 * v.net / row.oi) : 0;
+    return `<div class="posrow">
+      <div class="who"><i style="background:${CAT_COLOR[cat.key]}"></i>
+        <span>${cat.zh}<span class="en">${cat.en}</span></span></div>
+      <div class="bar">
+        <div class="s" style="width:${sw}%"></div>
+        <div class="l" style="width:${lw}%"></div>
+        <div class="mid"></div>
+      </div>
+      <div class="num ${dir(v.net)}">${signed(v.net)}
+        <span class="pct">淨部位佔 OI ${pctOI.toFixed(1)}%</span></div>
+    </div>`;
+  }).join('');
+}
+
+/* ── M2 本週誰在加倉 ─────────────────────────────────── */
+function judge(v) {
+  // 用變化較大的那一腿判定主導行為：淨部位轉多，可能是新增多單，也可能是空單回補，
+  // 兩者對後續行情的含義完全不同，不可混為一談。
+  const cl = v.chg_long || 0, cs = v.chg_short || 0;
+  if (cl === 0 && cs === 0) return '持平';
+  if (Math.abs(cl) >= Math.abs(cs)) return cl > 0 ? '增多單' : '減多單';
+  return cs > 0 ? '增空單' : '減空單';
+}
+
+function renderM2() {
+  const rows = [];
+  DATA.contracts.forEach(c => {
+    const r = DATA.latest[c.key];
+    DATA.categories.forEach(cat => {
+      const v = r.cats[cat.key];
+      if (v.net_chg === null || v.net_chg === undefined) return;
+      rows.push({ c, cat, v });
+    });
+  });
+  rows.sort((a, b) => Math.abs(b.v.net_chg) - Math.abs(a.v.net_chg));
+
+  $('m2').innerHTML = `<table>
+    <thead><tr>
+      <th class="l">合約</th><th class="l">交易人</th>
+      <th>多方變化</th><th>空方變化</th><th>淨部位變化</th>
+      <th>目前淨部位</th><th class="l">主導行為</th>
+    </tr></thead><tbody>
+    ${rows.slice(0, 14).map(({ c, cat, v }) => `<tr>
+      <td class="l">${c.zh}</td>
+      <td class="l"><span style="color:${CAT_COLOR[cat.key]}">●</span> ${cat.zh}</td>
+      <td class="${dir(v.chg_long)}">${signed(v.chg_long)}</td>
+      <td class="${dir(-(v.chg_short || 0))}">${signed(v.chg_short)}</td>
+      <td class="${dir(v.net_chg)}"><b>${signed(v.net_chg)}</b></td>
+      <td class="${dir(v.net)}">${signed(v.net)}</td>
+      <td class="l"><span class="tag ${dir(v.net_chg)}">${judge(v)}</span></td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+/* ── M3 極端度 ──────────────────────────────────────── */
+function renderM3() {
+  const row = DATA.latest[current];
+  const c = DATA.contracts.find(x => x.key === current);
+  const sample = row.cats.dealer.sample;
+  const firstDate = DATA.trail[current][0].date;
+  $('m3note').innerHTML = `百分位是目前淨部位在<b>該合約全歷史</b>中的位置
+    （${c.zh}共 ${num(sample)} 週樣本，愈接近 100 代表史上少見的偏多、愈接近 0 代表史上少見的偏空）。
+    z 值為近三年的標準差倍數。兩者都用<b>擴張視窗</b>計算，只看該週之前的資料，
+    不讓歷史圖上的每一點偷看未來。右圖起點 ${firstDate}。`;
+
+  $('m3gauges').innerHTML = DATA.categories.map(cat => {
+    const v = row.cats[cat.key];
+    const p = v.pctile;
+    return `<div class="gaugerow">
+      <div class="who" style="font-size:13px">${cat.zh}</div>
+      <div class="gauge">${p === null ? '' : `<div class="pin" style="left:calc(${p}% - 1px)"></div>`}</div>
+      <div class="num">${p === null ? '<span class="dim">樣本不足</span>' : p.toFixed(1) + '%'}
+        <span class="z">z ${v.z === null || v.z === undefined ? '—' : (v.z > 0 ? '+' : '') + v.z}</span></div>
+    </div>`;
+  }).join('');
+
+  const trail = DATA.trail[current];
+  const series = [
+    { name: '資產管理機構', color: 'var(--c-asset)', pts: trail.map(r => [r.date, r.cats.asset_mgr.net]) },
+    { name: '槓桿基金', color: 'var(--c-lev)', pts: trail.map(r => [r.date, r.cats.lev_money.net]) },
+    { name: '交易商／中介', color: 'var(--c-dealer)', pts: trail.map(r => [r.date, r.cats.dealer.net]) }
+  ];
+  $('m3chart').innerHTML =
+    `<div style="font-size:12.5px;color:var(--text2);margin-bottom:6px">三大類淨部位（近三年，口）</div>`
+    + lineChart(series, { zero: true, fmt: wan })
+    + legend(series);
+}
+
+/* ── M4 已實現波動 ──────────────────────────────────── */
+function renderM4() {
+  const map = [
+    { k: 'y2', name: '2 年期', color: 'var(--c-dealer)' },
+    { k: 'y10', name: '10 年期', color: 'var(--c-asset)' },
+    { k: 'y30', name: '30 年期', color: 'var(--c-lev)' }
+  ];
+  const series = map.map(m => ({
+    name: m.name, color: m.color, pts: DATA.vol[m.k].rv20
+  }));
+  const now = map.map(m => {
+    const rv20 = DATA.vol[m.k].rv20, rv60 = DATA.vol[m.k].rv60;
+    return `<div class="stat">${m.name} <b>${rv20[rv20.length - 1][1]}</b> bp／年
+      <span class="dim">（60 日 ${rv60[rv60.length - 1][1]}）</span></div>`;
+  }).join('');
+
+  $('m4').innerHTML = `<div class="statusbar" style="justify-content:flex-start;margin-bottom:10px">${now}</div>`
+    + lineChart(series, { fmt: v => v + ' bp' })
+    + legend(series)
+    + `<div class="note" style="margin:10px 0 0">20 日滾動窗；60 日值列在上方數字後方供對照。
+       20 日明顯高於 60 日＝波動正在放大。</div>`;
+}
+
+/* ── SVG 折線圖 ─────────────────────────────────────── */
+function lineChart(series, opt) {
+  opt = opt || {};
+  const W = 760, H = 210, PL = 54, PR = 8, PT = 10, PB = 22;
+  const all = series.flatMap(s => s.pts);
+  if (!all.length) return '';
+  const xs = all.map(p => new Date(p[0] + 'T00:00:00').getTime());
+  const ys = all.map(p => p[1]).filter(v => v !== null && v !== undefined);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (opt.zero) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }
+  const pad = (y1 - y0) * 0.08 || 1;
+  y0 -= pad; y1 += pad;
+
+  const px = t => PL + (W - PL - PR) * (t - x0) / (x1 - x0 || 1);
+  const py = v => PT + (H - PT - PB) * (1 - (v - y0) / (y1 - y0 || 1));
+  const fmt = opt.fmt || (v => String(v));
+
+  const paths = series.map(s => {
+    const d = s.pts.filter(p => p[1] !== null && p[1] !== undefined)
+      .map((p, i) => (i ? 'L' : 'M') + px(new Date(p[0] + 'T00:00:00').getTime()).toFixed(1)
+        + ' ' + py(p[1]).toFixed(1)).join(' ');
+    return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.6"
+      stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join('');
+
+  // Y 軸四格刻度
+  const ticks = [0, 1, 2, 3].map(i => {
+    const v = y0 + (y1 - y0) * i / 3;
+    return `<line class="axis" x1="${PL}" y1="${py(v).toFixed(1)}" x2="${W - PR}" y2="${py(v).toFixed(1)}"
+      opacity=".45"/><text x="${PL - 6}" y="${(py(v) + 3.5).toFixed(1)}" text-anchor="end">${fmt(Math.round(v))}</text>`;
+  }).join('');
+
+  const zeroLine = (opt.zero && y0 < 0 && y1 > 0)
+    ? `<line class="zero" x1="${PL}" y1="${py(0).toFixed(1)}" x2="${W - PR}" y2="${py(0).toFixed(1)}"/>` : '';
+
+  // X 軸：頭、中、尾三個日期
+  const xl = [0, 0.5, 1].map(f => {
+    const t = x0 + (x1 - x0) * f;
+    const iso = new Date(t).toISOString().slice(0, 10);
+    const anchor = f === 0 ? 'start' : (f === 1 ? 'end' : 'middle');
+    return `<text x="${px(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor}">${iso.slice(0, 7)}</text>`;
+  }).join('');
+
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">
+    ${ticks}${zeroLine}${paths}${xl}</svg>`;
+}
+
+function legend(series) {
+  return `<div class="legend">${series.map(s =>
+    `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>`;
+}
+
+/* ── 進入點 ─────────────────────────────────────────── */
+function render() {
+  renderChips(); renderM1(); renderM2(); renderM3(); renderM4();
+}
+
+fetch('data/latest.json')
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(d => { DATA = d; renderStatus(); render(); })
+  .catch(e => {
+    document.body.insertAdjacentHTML('afterbegin',
+      `<div class="card" style="border-color:var(--warn);color:var(--warn);margin-bottom:14px">
+       載入 data/latest.json 失敗：${e.message}。請確認網站已完成建置。</div>`);
+  });

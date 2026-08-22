@@ -1,0 +1,61 @@
+# 對帳驗證紀錄
+
+本站的數字必須跟 CFTC 官方發布的報告對得上。校驗基準只能來自外部——
+不可拿自家管線的輸出當「應為 X」的依據，那只會驗證管線跟自己一致。
+
+## 驗證方法
+
+Socrata API（`publicreporting.cftc.gov/resource/yw9f-hn96.json`）與
+純文字報告（`cftc.gov/dea/newcot/FinComWk.txt`）是 CFTC 的**兩條不同發布管道**。
+本站抓的是前者，對帳用的是後者。這樣才驗得出「欄位對應接錯」這一類錯誤——
+例如把 `asset_mgr_spread` 誤當 `asset_mgr_short` 使用，API 內部永遠自洽，
+只有跟原始報告逐欄比對才會現形。
+
+重跑方式：
+
+```bash
+python scripts/reconcile.py                 # 直接抓
+python scripts/reconcile.py FinComWk.txt    # 用手動存下的報告檔
+```
+
+`cftc.gov` 主站有 Akamai 機器人偵測，一般 HTTP 客戶端與 `curl_cffi` 都會拿到 403
+（`publicreporting.cftc.gov` 的 Socrata API 不受影響）。被擋時請用瀏覽器開
+<https://www.cftc.gov/dea/newcot/FinComWk.txt> 另存，再把路徑傳給腳本。
+
+## 紀錄
+
+### 2026-08-22 — 報告日 2026-08-18
+
+比對來源：`cftc.gov/dea/newcot/FinComWk.txt`（經瀏覽器取得，2026-08-22）
+
+| 項目 | 結果 |
+|:--|:--|
+| 比對合約 | 六檔全數（2Y / 5Y / 10Y / Ultra 10Y / BOND / Ultra BOND） |
+| 每檔比對欄位 | 未平倉量、未平倉量週變化、五類交易人各自的多方／空方／價差部位 |
+| 比對數字總數 | **96** |
+| 不符數 | **0** |
+
+抽樣（UST 10Y NOTE，2026-08-18）：
+
+| 欄位 | 官方報告 | 本站 |
+|:--|--:|--:|
+| 未平倉量 | 6,694,536 | 6,694,536 |
+| Dealer 多／空／價差 | 150,579 / 681,018 / 357,332 | 同 |
+| Asset Manager 多／空／價差 | 3,347,099 / 763,215 / 767,684 | 同 |
+| Leveraged Money 多／空／價差 | 358,017 / 2,530,294 / 867,449 | 同 |
+| Other Reportable 多／空／價差 | 307,552 / 221,385 / 65,967 | 同 |
+| Non-Reportable 多／空 | 472,857 / 440,193 | 同 |
+
+## 常設的內在一致性檢查
+
+除了對外比對，`scripts/validate.py` 每次建置都會驗一條 CFTC 報告的恆等式：
+
+> 五類交易人的多方部位 ＋ 價差部位 ＝ 總未平倉量
+
+這條式子對不上，就代表欄位漏了一類或接錯了一欄。它不依賴外部連線，
+所以能放進每次排程；對外比對則因主站擋自動請求，維持人工觸發。
+
+## 待辦
+
+- 目前只對過最新一期。`FinComWk.txt` 僅含當期，歷史期別要另從 CFTC 的
+  年度壓縮檔取得。等累積幾期後補一次跨期比對，確認歷史序列沒有被 API 悄悄修訂。

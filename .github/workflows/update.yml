@@ -1,0 +1,132 @@
+name: 更新美債部位資料
+
+on:
+  schedule:
+    # CFTC 的 COT 是**週報**：報週二收盤的部位，當週五 15:30 ET 才公布
+    # （台北週六凌晨 03:30 夏令／04:30 冬令）。所以排程跟著週節奏走，不是每天跑。
+    #
+    # 三個時點各有分工：
+    #   台北週六 09:17（UTC 六 01:17）—— 主場。發布後幾小時，資料最新。
+    #   台北週六 21:17（UTC 六 13:17）—— 對 GitHub 排程延遲避險，同日補一次。
+    #   台北週二 09:17（UTC 二 01:17）—— 遇美國假日 CFTC 會順延到下週一發布，
+    #                                     這一次負責把順延的那期補回來。
+    #
+    # 刻意避開整點與 UTC 00:00：GitHub 排程是 best-effort，UTC 00:00 是全平台
+    # 最壅塞的時段（多數人都寫 '0 0 * * *'），公開 repo 優先序又更低。
+    # 同一套架構的美國總經手冊原本設 UTC 00:00，實際穩定遲到 10 小時以上。
+    #
+    # 沒有新資料時 build 產出的檔案完全相同（meta 不含建置時間），
+    # 「提交變更」那步會自己略過，不會累積空 commit。
+    - cron: '17 1 * * 6'
+    - cron: '17 13 * * 6'
+    - cron: '17 1 * * 2'
+  workflow_dispatch:        # CFTC 補發修正、或想立刻更新時手動按這個
+  push:
+    branches: [main]
+    paths:                  # 改到抓取或計算邏輯時自動重跑一次驗證
+      - 'scripts/**'
+      - '.github/workflows/update.yml'
+
+permissions:
+  contents: write
+  actions: write   # 提交資料後要能 dispatch pages.yml 觸發部署
+  issues: write    # 失敗時開 issue 通知
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 安裝相依套件
+        run: pip install -r requirements.txt
+
+      - name: 回歸測試
+        # 擋的都是「算錯數字」——淨部位的定義、年化係數、極端度的樣本下限。
+        # 不連網，所以資料源掛掉不會誤判成這裡失敗。
+        run: python scripts/test_transform.py
+
+      - name: 抓取並組裝資料
+        # CFTC Socrata 與 FRED CSV 都是公開免金鑰端點，這裡不需要任何 secret
+        run: python scripts/build.py
+
+      - name: 檢查產出是否可用
+        # 過期門檻、六檔齊全、五類加總對得上未平倉量、歷史檔列數。
+        # 任一項不過就中止，保留上一版資料，不要把壞掉的東西推上網站。
+        run: python scripts/validate.py
+
+      - name: 提交變更
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet data/; then
+            echo "資料沒有變化，不需提交"
+            exit 0
+          fi
+          git add data/
+          git commit -m "資料更新 $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')"
+          echo "COMMITTED=1" >> "$GITHUB_ENV"
+
+          # 抓六檔完整歷史要幾分鐘，這段時間主分支可能被別的 push 動過。
+          # plain push 一撞就整次失敗、資料白抓；改成 fetch+merge 重試，
+          # 衝突一律保留這次剛跑出的新值（只有 data/ 會變，用 -X ours 安全）。
+          for i in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "push 被拒絕（第 $i 次），fetch 後重新合併再試"
+            git fetch origin main
+            git merge -X ours origin/main -m "合併：保留本次新抓的資料"
+          done
+          echo "::error::push 重試 5 次仍失敗，資料留在 runner 上未提交"
+          exit 1
+
+      - name: 觸發網站部署
+        # GITHUB_TOKEN 推的 commit 不會觸發其他 workflow（GitHub 防遞迴），
+        # 所以 push 本身帶不動 pages.yml——workflow_dispatch 是這條規則的例外，
+        # 這裡在有新資料時明確 dispatch 一次，網站才會跟著更新。
+        if: env.COMMITTED == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches" \
+            -d '{"ref":"main"}'
+
+      - name: 失敗時開 issue 通知
+        # 同一套架構在 us-macro-detail 踩過：排程失敗沒有任何通知，是「剛好想看」
+        # 才發現網站停在舊資料。開 issue 與留言 GitHub 都會寄信，不必另接 webhook。
+        # 已有未關閉的同名 issue 時只補留言，避免連續失敗每次開一張新的。
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="🔴 自動化失敗：${{ github.workflow }}"
+          body=$(printf '%s\n' \
+            "**workflow**：${{ github.workflow }}" \
+            "**觸發方式**：${{ github.event_name }}" \
+            "**時間**：$(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M') 台北" \
+            "**log**：$RUN_URL" \
+            "" \
+            "資料未更新，網站仍停在上一版。修好後手動補跑一次 update workflow 即可。" \
+            "處理完請把這張 issue 關掉——還開著的話，之後的失敗只會累積留言不會另開新張。")
+          existing=$(gh issue list --state open --label automation-failure --limit 50 \
+            --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh label create automation-failure --color B60205 --description "排程自動化失敗" 2>/dev/null || true
+            gh issue create --title "$title" --body "$body" --label automation-failure
+          fi

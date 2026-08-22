@@ -1,0 +1,4 @@
+requests>=2.31
+# cftc.gov 主站有 Akamai 機器人偵測（publicreporting.cftc.gov 的 Socrata API 沒有，
+# 但 FRED 與日後可能加的來源仍可能遇到），保留 curl_cffi 作為 fallback。
+curl_cffi>=0.7

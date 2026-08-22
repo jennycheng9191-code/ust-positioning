@@ -1,0 +1,47 @@
+name: 部署網站
+
+# 走明確的 Actions 部署，不用 GitHub 內建的「pages build and deployment」舊路徑。
+# 同一套架構的 au-macro-guide 在 2026-08-06 曾連續 7 次以 `Timeout reached, aborting!`
+# 失敗——build 每次成功，deploy 送出請求後輪詢滿 10 分鐘等不到 Pages 後端回報。
+# 這個站台是純靜態 HTML/CSS/JS/JSON，本來就不需要 Jekyll。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 排隊而不是互相取消。「更新美債部位資料」推完資料會緊接著 dispatch 這裡，
+# cancel-in-progress 會把前一次砍在半路。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # enablement: true —— 站台被 Unpublish 後由這一步自己重新建立
+      # （build_type 直接設成 workflow，不會退回 Jekyll 舊路徑），
+      # 不需要再進 Settings 手動開一次。站台已存在時這個參數不做事。
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: 打包整個站台
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'          # .git 與 .github 由 action 自動排除
+
+      - name: 發佈到 GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
