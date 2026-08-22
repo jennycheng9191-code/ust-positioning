@@ -45,6 +45,30 @@ def get_json(url: str, params: dict | None = None):
     return get(url, params).json()
 
 
+def get_impersonated(url: str, params: dict | None = None, retries: int = 4, timeout: int = 90):
+    """模擬 Chrome 的 TLS 指紋來抓。
+
+    FRED 會對一般 HTTP 客戶端重置連線（本機是 ConnectionReset，
+    GitHub runner 上表現為讀取逾時），curl_cffi 偽裝指紋後 2.8 秒就抓完 20 年日資料。
+    這是 CME、cftc.gov 主站、AOFM 都用的同一類防護。
+
+    CFTC 的 Socrata API（publicreporting.cftc.gov）沒有這層，用一般 requests 即可，
+    所以不把整個專案都換過去——多一層偽裝就多一個會壞的地方。
+    """
+    from curl_cffi import requests as cr
+
+    last = None
+    for attempt in range(retries):
+        try:
+            r = cr.get(url, params=params, timeout=timeout, impersonate="chrome")
+            r.raise_for_status()
+            return r
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(2.0 * (attempt + 1))
+    raise RuntimeError(f"取得失敗（偽裝指紋）{url}: {last}")
+
+
 def read_json(path: Path, default=None):
     if not path.exists():
         return default
