@@ -1,8 +1,17 @@
-"""CFTC Commitments of Traders — TFF（Traders in Financial Futures）期貨＋選擇權合併版。
+"""CFTC Commitments of Traders — TFF（Traders in Financial Futures）。
 
-為什麼用「合併版」而不是「僅期貨版」：合併版把選擇權部位以 delta 加權後併入，
-本專案原本要做的是選擇權未平倉分析，CME 授權不允許（見 docs/source-audit.md），
-改走 COT 之後，合併版是唯一還保留選擇權資訊的口徑。
+CFTC 對同一批部位發兩種口徑：
+- **合併版**（Combined）：選擇權部位以 delta 加權換算成期貨當量後併入
+- **僅期貨版**（FutOnly）：只算期貨
+
+兩者的欄位定義與歷史區間完全一致（六檔同為 1054／544／860 週），
+所以逐週相減就得到**選擇權單獨的部位**——這是本站三種口徑的來源：
+
+    options = combined − futonly
+
+實測 2026-08-18 的 10 年期：合併版未平倉 669.5 萬口、僅期貨 559.7 萬口，
+選擇權貢獻 109.8 萬口（19.6%）。要留意的是選擇權撐大的主要是**總量**而非淨方向——
+同一天資產管理的淨部位，兩種口徑只差 1,611 口，因為選擇權多空的 delta 大致互抵。
 
 資料授權：CFTC 為美國聯邦政府機關，其報告依 17 U.S.C. §105 不受著作權保護，
 可自由使用與再散布。
@@ -11,7 +20,15 @@ from __future__ import annotations
 
 from common import get_json, to_date
 
-API = "https://publicreporting.cftc.gov/resource/yw9f-hn96.json"
+API_TMPL = "https://publicreporting.cftc.gov/resource/%s.json"
+
+# 三種口徑。options 不是 CFTC 發布的資料集，是本站由前兩者相減得出。
+DATASETS = {"combined": "yw9f-hn96", "futonly": "gpe5-46if"}
+BASES = [
+    {"key": "combined", "zh": "期貨＋選擇權", "note": "選擇權以 delta 加權併入"},
+    {"key": "futonly",  "zh": "僅期貨",       "note": "CFTC 另一份報告"},
+    {"key": "options",  "zh": "僅選擇權",     "note": "合併版減僅期貨版，本站計算"},
+]
 
 # 六檔美債合約。code 為 CFTC 的 cftc_contract_market_code。
 # 歷史起點各不相同，Ultra 兩檔上市較晚——極端度統計要標示樣本數，不可跟 20 年樣本並排。
@@ -81,12 +98,16 @@ def _num(v):
         return None
 
 
-def fetch_contract(code: str) -> list[dict]:
-    """抓單一合約的完整歷史，自動分頁。回傳依報告日由舊到新。"""
+def fetch_contract(code: str, basis: str = "combined") -> list[dict]:
+    """抓單一合約的完整歷史，自動分頁。回傳依報告日由舊到新。
+
+    basis 為 'combined' 或 'futonly'；'options' 不在 CFTC 那邊，由 subtract() 算出來。
+    """
+    api = API_TMPL % DATASETS[basis]
     rows: list[dict] = []
     offset = 0
     while True:
-        batch = get_json(API, {
+        batch = get_json(api, {
             "cftc_contract_market_code": code,
             "$order": "report_date_as_yyyy_mm_dd ASC",
             "$limit": PAGE,
@@ -125,12 +146,55 @@ def normalise(raw: list[dict]) -> list[dict]:
     return out
 
 
-def fetch_all() -> dict:
+def subtract(combined: list[dict], futonly: list[dict]) -> list[dict]:
+    """選擇權部位 ＝ 合併版 − 僅期貨版，逐週逐欄相減。
+
+    只保留兩邊都有的報告日：某一期缺一半就整期跳過，不用單邊資料硬湊。
+    交易人數（traders_*）不相減——同一個機構可能同時持有期貨與選擇權，
+    兩個數字相減出來的不是任何真實的人數。
+    """
+    fo = {r["date"]: r for r in futonly}
+    out = []
+    for c in combined:
+        f = fo.get(c["date"])
+        if not f:
+            continue
+        rec = {
+            "date": c["date"],
+            "oi": _sub(c["oi"], f["oi"]),
+            "oi_chg": _sub(c["oi_chg"], f["oi_chg"]),
+            "units": c["units"],
+            "cats": {},
+        }
+        for k, cv in c["cats"].items():
+            fv = f["cats"].get(k, {})
+            rec["cats"][k] = {
+                "long": _sub(cv["long"], fv.get("long")),
+                "short": _sub(cv["short"], fv.get("short")),
+                "spread": _sub(cv["spread"], fv.get("spread")),
+                "chg_long": _sub(cv["chg_long"], fv.get("chg_long")),
+                "chg_short": _sub(cv["chg_short"], fv.get("chg_short")),
+                "traders_long": None,
+                "traders_short": None,
+            }
+        out.append(rec)
+    return out
+
+
+def _sub(a, b):
+    if a is None or b is None:
+        return None
+    return a - b
+
+
+def fetch_all(basis: str = "combined") -> dict:
     """抓六檔。回傳 {contract_key: [週紀錄...]}。"""
     result = {}
     for c in CONTRACTS:
-        rows = normalise(fetch_contract(c["code"]))
+        rows = normalise(fetch_contract(c["code"], basis))
         if not rows:
-            raise RuntimeError(f"{c['key']}（{c['code']}）抓不到任何資料")
+            raise RuntimeError(f"{c['key']}（{c['code']}／{basis}）抓不到任何資料")
         result[c["key"]] = rows
     return result
+
+

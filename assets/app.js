@@ -10,6 +10,11 @@ const CAT_COLOR = {
 
 let DATA = null;
 let current = 'ust10y';
+let basis = 'combined';   // combined / futonly / options
+
+// 三種口徑共用同一組合約與交易人分類，只是看的是同一批部位的不同切面。
+const L = () => DATA.latest[basis][current];
+const T = () => DATA.trail[basis][current];
 
 const $ = id => document.getElementById(id);
 const num = n => (n === null || n === undefined) ? '—' : n.toLocaleString('en-US');
@@ -39,7 +44,7 @@ function renderStatus() {
 /* ── 合約切換 ────────────────────────────────────────── */
 function renderChips() {
   $('chips').innerHTML = DATA.contracts.map(c => {
-    const oi = DATA.latest[c.key].oi;
+    const oi = DATA.latest[basis][c.key].oi;
     return `<button class="chip${c.key === current ? ' on' : ''}" data-k="${c.key}">
       ${c.zh}<span class="sm">OI ${wan(oi)}</span></button>`;
   }).join('');
@@ -47,12 +52,29 @@ function renderChips() {
     b.onclick = () => { current = b.dataset.k; render(); });
 }
 
+/* ── 口徑切換 ────────────────────────────────────────── */
+function renderBases() {
+  $('bases').innerHTML = DATA.bases.map(b =>
+    `<button class="basebtn${b.key === basis ? ' on' : ''}" data-b="${b.key}"
+       title="${b.note}">${b.zh}</button>`).join('');
+  $('bases').querySelectorAll('.basebtn').forEach(b =>
+    b.onclick = () => { basis = b.dataset.b; render(); });
+}
+
 /* ── M1 部位結構 ─────────────────────────────────────── */
 function renderM1() {
-  const row = DATA.latest[current];
+  const row = L();
   const c = DATA.contracts.find(x => x.key === current);
-  $('m1note').innerHTML = `${c.zh}合約，未平倉量 <b>${num(row.oi)}</b> 口，
-    週變化 <span class="${dir(row.oi_chg)}">${signed(row.oi_chg)}</span>${row.units ? '，' + row.units : ''}。
+  const b = DATA.bases.find(x => x.key === basis);
+
+  // 選了「期貨＋選擇權」時順便報出選擇權佔多少——這是拆分口徑最直接的用處。
+  const optOI = DATA.latest.options[current].oi;
+  const cbOI = DATA.latest.combined[current].oi;
+  const share = basis === 'combined'
+    ? `其中選擇權貢獻 <b>${num(optOI)}</b> 口（${(100 * optOI / cbOI).toFixed(1)}%）。` : '';
+
+  $('m1note').innerHTML = `${c.zh}合約 · <b>${b.zh}</b>，未平倉量 <b>${num(row.oi)}</b> 口，
+    週變化 <span class="${dir(row.oi_chg)}">${signed(row.oi_chg)}</span>。${share}
     左綠為空方、右紅為多方，長度以同一把尺；價差（spread）部位是同時持有多空的套利腿，不計入淨額。`;
 
   const scale = Math.max(...DATA.categories.map(cat => {
@@ -91,7 +113,7 @@ function judge(v) {
 function renderM2() {
   const rows = [];
   DATA.contracts.forEach(c => {
-    const r = DATA.latest[c.key];
+    const r = DATA.latest[basis][c.key];
     DATA.categories.forEach(cat => {
       const v = r.cats[cat.key];
       if (v.net_chg === null || v.net_chg === undefined) return;
@@ -100,7 +122,10 @@ function renderM2() {
   });
   rows.sort((a, b) => Math.abs(b.v.net_chg) - Math.abs(a.v.net_chg));
 
-  $('m2').innerHTML = `<table>
+  const bz = DATA.bases.find(x => x.key === basis).zh;
+  $('m2').innerHTML = `<div style="font-size:12.5px;color:var(--text2);margin-bottom:9px">
+      口徑：<b>${bz}</b></div>
+    <table>
     <thead><tr>
       <th class="l">合約</th><th class="l">交易人</th>
       <th>多方變化</th><th>空方變化</th><th>淨部位變化</th>
@@ -120,11 +145,12 @@ function renderM2() {
 
 /* ── M3 極端度 ──────────────────────────────────────── */
 function renderM3() {
-  const row = DATA.latest[current];
+  const row = L();
   const c = DATA.contracts.find(x => x.key === current);
+  const b = DATA.bases.find(x => x.key === basis);
   const sample = row.cats.dealer.sample;
-  const firstDate = DATA.trail[current][0].date;
-  $('m3note').innerHTML = `百分位是目前淨部位在<b>該合約全歷史</b>中的位置
+  const firstDate = T()[0].date;
+  $('m3note').innerHTML = `<b>${b.zh}</b>口徑。百分位是目前淨部位在<b>該合約該口徑的全歷史</b>中的位置
     （${c.zh}共 ${num(sample)} 週樣本，愈接近 100 代表史上少見的偏多、愈接近 0 代表史上少見的偏空）。
     z 值為近三年的標準差倍數。兩者都用<b>擴張視窗</b>計算，只看該週之前的資料，
     不讓歷史圖上的每一點偷看未來。右圖起點 ${firstDate}。`;
@@ -140,7 +166,7 @@ function renderM3() {
     </div>`;
   }).join('');
 
-  const trail = DATA.trail[current];
+  const trail = T();
   const series = [
     { name: '資產管理機構', color: 'var(--c-asset)', pts: trail.map(r => [r.date, r.cats.asset_mgr.net]) },
     { name: '槓桿基金', color: 'var(--c-lev)', pts: trail.map(r => [r.date, r.cats.lev_money.net]) },
@@ -230,7 +256,7 @@ function legend(series) {
 
 /* ── 進入點 ─────────────────────────────────────────── */
 function render() {
-  renderChips(); renderM1(); renderM2(); renderM3(); renderM4();
+  renderChips(); renderBases(); renderM1(); renderM2(); renderM3(); renderM4();
 }
 
 fetch('data/latest.json')

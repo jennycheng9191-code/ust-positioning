@@ -10,7 +10,7 @@ from datetime import date
 
 import derive
 from build import next_release
-from cftc import _num, normalise
+from cftc import _num, normalise, subtract
 
 
 def check(name: str, got, want) -> None:
@@ -102,6 +102,50 @@ def test_next_release():
     check("跨月正確", next_release(date(2026, 12, 29)), date(2027, 1, 8))
 
 
+def _row(date, oi, long, short, spread=0, traders=7):
+    return {"date": date, "oi": oi, "oi_chg": None, "units": "u",
+            "cats": {"a": {"long": long, "short": short, "spread": spread,
+                           "chg_long": None, "chg_short": None,
+                           "traders_long": traders, "traders_short": traders}}}
+
+
+def test_subtract_gives_options_leg():
+    """選擇權部位 ＝ 合併版 − 僅期貨版，逐欄相減。"""
+    cb = [_row("2026-08-18", 1000, 600, 300, 100)]
+    fo = [_row("2026-08-18", 700, 450, 200, 50)]
+    out = subtract(cb, fo)
+    check("選擇權未平倉量", out[0]["oi"], 300)
+    check("選擇權多方", out[0]["cats"]["a"]["long"], 150)
+    check("選擇權空方", out[0]["cats"]["a"]["short"], 100)
+    check("選擇權價差", out[0]["cats"]["a"]["spread"], 50)
+
+
+def test_subtract_drops_traders():
+    """交易人數不能相減——同一機構可能同時持有期貨與選擇權，
+    兩個數字相減出來的不是任何真實的人數。"""
+    out = subtract([_row("2026-08-18", 1000, 600, 300, 0, traders=90)],
+                   [_row("2026-08-18", 700, 450, 200, 0, traders=80)])
+    check("選擇權不給交易人數", out[0]["cats"]["a"]["traders_long"], None)
+
+
+def test_subtract_skips_unmatched_dates():
+    """某一期只有單邊有資料就整期跳過，不用半份資料硬湊。"""
+    cb = [_row("2026-08-11", 1000, 600, 300), _row("2026-08-18", 1100, 650, 320)]
+    fo = [_row("2026-08-18", 700, 450, 200)]
+    out = subtract(cb, fo)
+    check("只保留兩邊都有的期別", [r["date"] for r in out], ["2026-08-18"])
+
+
+def test_subtract_preserves_identity():
+    """恆等式（五類多方＋價差＝未平倉量）在相減後仍須成立——
+    這是 validate.py 用來確認兩份報告有對齊的那道檢查。"""
+    cb = [_row("2026-08-18", 1000, 900, 300, 100)]   # 900 + 100 = 1000 ✓
+    fo = [_row("2026-08-18", 700, 650, 200, 50)]     # 650 +  50 =  700 ✓
+    o = subtract(cb, fo)[0]
+    total = o["cats"]["a"]["long"] + o["cats"]["a"]["spread"]
+    check("相減後恆等式仍成立", total, o["oi"])
+
+
 def test_normalise_sorts_by_date():
     """Socrata 分頁若順序被打亂，滾動統計會全錯，所以正規化時強制排序。"""
     raw = [
@@ -117,6 +161,8 @@ if __name__ == "__main__":
     for fn in [test_num, test_net_excludes_spread, test_net_chg_uses_computed,
                test_chg_mismatch_flags_real_gap, test_percentile,
                test_extremes_need_min_sample, test_realised_vol,
-               test_next_release, test_normalise_sorts_by_date]:
+               test_next_release, test_normalise_sorts_by_date,
+               test_subtract_gives_options_leg, test_subtract_drops_traders,
+               test_subtract_skips_unmatched_dates, test_subtract_preserves_identity]:
         fn()
     print("\n全部通過。")

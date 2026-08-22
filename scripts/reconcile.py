@@ -6,11 +6,18 @@
 校驗基準必須來自外部，不能是自家管線的輸出。
 
 用法：
-    python scripts/reconcile.py                    # 直接抓（cftc.gov 常擋自動請求）
-    python scripts/reconcile.py FinComWk.txt       # 用手動存下來的報告檔
+    python scripts/reconcile.py                              # 對合併版，直接抓
+    python scripts/reconcile.py FinComWk.txt                 # 對合併版，用手動存下的檔
+    python scripts/reconcile.py FinFutWk.txt futonly         # 對僅期貨版
+
+「僅選擇權」口徑不在這裡對——它是本站由前兩者相減得出的，CFTC 沒有對應的原始報告。
+它的正確性由 validate.py 的兩道檢查守住：恆等式（五類多方＋價差＝未平倉量）
+在相減後仍須成立，且選擇權未平倉量必須落在 0 與合併版之間。
 
 cftc.gov 主站有 Akamai 機器人偵測，一般 HTTP 客戶端與 curl_cffi 都會拿到 403。
-擋住時請用瀏覽器開 https://www.cftc.gov/dea/newcot/FinComWk.txt 另存，再把路徑傳進來。
+擋住時請用瀏覽器開下列網址另存，再把路徑傳進來：
+  合併版   https://www.cftc.gov/dea/newcot/FinComWk.txt
+  僅期貨版 https://www.cftc.gov/dea/newcot/FinFutWk.txt
 """
 from __future__ import annotations
 
@@ -22,7 +29,10 @@ from pathlib import Path
 from cftc import CONTRACTS
 from common import DATA, get, read_json
 
-REPORT_URL = "https://www.cftc.gov/dea/newcot/FinComWk.txt"
+REPORT_URLS = {
+    "combined": "https://www.cftc.gov/dea/newcot/FinComWk.txt",
+    "futonly": "https://www.cftc.gov/dea/newcot/FinFutWk.txt",
+}
 
 # FinComWk.txt 的欄位位置（TFF 期貨＋選擇權合併版）。
 # 這張表是對帳的核心：如果 cftc.py 的欄位對應接錯，就是在這裡被抓出來。
@@ -39,14 +49,15 @@ COLS = {
 CATS = ["dealer", "asset_mgr", "lev_money", "other_rept", "nonrept"]
 
 
-def load_report(arg: str | None) -> str:
+def load_report(arg: str | None, basis: str) -> str:
     if arg:
         return Path(arg).read_text(encoding="utf-8", errors="replace")
+    url = REPORT_URLS[basis]
     try:
-        return get(REPORT_URL).text
+        return get(url).text
     except Exception as e:  # noqa: BLE001
         print(f"直接抓取失敗（{e}）。", file=sys.stderr)
-        print(f"請用瀏覽器開 {REPORT_URL} 另存後，把檔案路徑當參數傳進來。", file=sys.stderr)
+        print(f"請用瀏覽器開 {url} 另存後，把檔案路徑當參數傳進來。", file=sys.stderr)
         sys.exit(2)
 
 
@@ -64,20 +75,28 @@ def parse(text: str) -> dict[str, list[str]]:
 
 
 def main() -> None:
-    text = load_report(sys.argv[1] if len(sys.argv) > 1 else None)
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    basis = sys.argv[2] if len(sys.argv) > 2 else "combined"
+    if basis not in REPORT_URLS:
+        print(f"口徑只能是 {sorted(REPORT_URLS)}，'options' 沒有官方原始報告可對。",
+              file=sys.stderr)
+        sys.exit(2)
+
+    text = load_report(path, basis)
     official = parse(text)
     ours = read_json(DATA / "latest.json")
     if not ours:
         print("找不到 data/latest.json，請先跑 scripts/build.py", file=sys.stderr)
         sys.exit(1)
 
+    print(f"比對口徑：{basis}\n")
     checked = mismatches = 0
     for c in CONTRACTS:
         row = official.get(c["code"])
         if not row:
             print(f"⚠ {c['zh']}（{c['code']}）不在這份報告裡，跳過")
             continue
-        mine = ours["latest"][c["key"]]
+        mine = ours["latest"][basis][c["key"]]
 
         def cmp(label, want, got):
             nonlocal checked, mismatches
