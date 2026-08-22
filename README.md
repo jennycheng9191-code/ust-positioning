@@ -102,7 +102,7 @@ scripts/
   derive.py    淨部位、週變化、極端度、已實現波動
   build.py     主流程，產出 data/
   validate.py  產出檢查（過期門檻、恆等式、零和、選擇權範圍、列數）
-  reconcile.py 對 CFTC 原始報告的外部對帳（合併版與僅期貨版）
+  reconcile.py 對 CFTC 四份原始報告的外部對帳（兩分類法 × 兩口徑）
   test_transform.py  回歸測試（不連網）
 data/
   latest.json       網頁吃的那份

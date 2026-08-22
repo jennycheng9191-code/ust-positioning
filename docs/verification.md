@@ -5,22 +5,35 @@
 
 ## 驗證方法
 
-Socrata API（`publicreporting.cftc.gov/resource/yw9f-hn96.json`）與
-純文字報告（`cftc.gov/dea/newcot/FinComWk.txt`）是 CFTC 的**兩條不同發布管道**。
-本站抓的是前者，對帳用的是後者。這樣才驗得出「欄位對應接錯」這一類錯誤——
-例如把 `asset_mgr_spread` 誤當 `asset_mgr_short` 使用，API 內部永遠自洽，
-只有跟原始報告逐欄比對才會現形。
+Socrata API（`publicreporting.cftc.gov`）與純文字報告（`cftc.gov/dea/newcot/`）
+是 CFTC 的**兩條不同發布管道**。本站抓的是前者，對帳用的是後者。
+這樣才驗得出「欄位對應接錯」這一類錯誤——例如把 `asset_mgr_spread` 誤當
+`asset_mgr_short` 使用，API 內部永遠自洽，只有跟原始報告逐欄比對才會現形。
+
+四份官方原始報告：
+
+| 分類法 | 口徑 | 檔案 | 每份比對數字 |
+|:--|:--|:--|--:|
+| TFF | 合併版 | `FinComWk.txt` | 96 |
+| TFF | 僅期貨 | `FinFutWk.txt` | 96 |
+| Legacy | 合併版 | `deacom.txt` | 54 |
+| Legacy | 僅期貨 | `deafut.txt` | 54 |
+
+兩套分類法的檔案格式不同，欄位位置不能共用（見 `reconcile.py` 的 `REPORTS`）：
+TFF 每類都有 long／short／spread 三欄、五類連續排列；Legacy 只有 noncomm 有 spread，
+第 13、14 欄是可報告戶合計要跳過，第 17 欄之後還有 old／other 期別的重複區塊，
+週變化要到第 37 欄才開始。
 
 重跑方式：
 
 ```bash
-python scripts/reconcile.py                 # 直接抓
-python scripts/reconcile.py FinComWk.txt    # 用手動存下的報告檔
+python scripts/reconcile.py                            # 四份全對
+python scripts/reconcile.py legacy combined deacom.txt # 指定一份，用本機檔
 ```
 
 `cftc.gov` 主站有 Akamai 機器人偵測，一般 HTTP 客戶端與 `curl_cffi` 都會拿到 403
 （`publicreporting.cftc.gov` 的 Socrata API 不受影響）。被擋時請用瀏覽器開
-<https://www.cftc.gov/dea/newcot/FinComWk.txt> 另存，再把路徑傳給腳本。
+<https://www.cftc.gov/dea/newcot/> 底下對應的檔案另存，再把路徑當第三個參數傳進去。
 
 ## 紀錄
 
@@ -66,16 +79,42 @@ python scripts/reconcile.py FinComWk.txt    # 用手動存下的報告檔
 
 實測 2026-08-18 六檔全數通過這兩道檢查。
 
+### 2026-08-22 — 加入 Legacy 分類法後，四份報告全數對帳
+
+| 分類法 | 口徑 | 對帳來源 | 比對數字 | 不符 |
+|:--|:--|:--|--:|--:|
+| TFF | 合併版 | `FinComWk.txt` | 96 | **0** |
+| TFF | 僅期貨 | `FinFutWk.txt` | 96 | **0** |
+| Legacy | 合併版 | `deacom.txt` | 54 | **0** |
+| Legacy | 僅期貨 | `deafut.txt` | 54 | **0** |
+| | | **合計** | **300** | **0** |
+
+抽樣（UST BOND，2026-08-18，Legacy 合併版）：
+
+| 欄位 | 官方報告 | 本站 |
+|:--|--:|--:|
+| 未平倉量 | 2,222,421 | 同 |
+| 非商業 多／空／價差 | 163,981 / 381,399 / 217,635 | 同 |
+| 商業 多／空 | 1,577,693 / 1,422,734 | 同 |
+| 非報告小戶 多／空 | 263,112 / 200,654 | 同 |
+
+「僅選擇權」口徑仍無官方報告可對（CFTC 不發這份），其正確性由內在檢查守住，見下節。
+
 ## 常設的內在一致性檢查
 
-除了對外比對，`scripts/validate.py` 每次建置都會驗一條 CFTC 報告的恆等式：
-
-> 五類交易人的多方部位 ＋ 價差部位 ＝ 總未平倉量
-
-這條式子對不上，就代表欄位漏了一類或接錯了一欄。它不依賴外部連線，
+除了對外比對，`scripts/validate.py` 每次建置都會驗三條，全部不依賴外部連線，
 所以能放進每次排程；對外比對則因主站擋自動請求，維持人工觸發。
+
+1. **恆等式**：各類交易人的多方部位 ＋ 價差部位 ＝ 總未平倉量。
+   對不上就代表欄位漏了一類或接錯了一欄。
+2. **零和**：各類淨部位加總為 0——每一口多單都有對應的空單。
+   與恆等式互補：恆等式驗總量，零和驗方向，欄位接錯時零和會立刻破。
+3. **選擇權範圍**：相減出來的選擇權未平倉量必須落在 0 與合併版之間。
+   超出範圍指向兩份報告的期別沒對齊。
+
+三者對兩套分類法 × 三種口徑 × 六檔全數成立。
 
 ## 待辦
 
-- 目前只對過最新一期。`FinComWk.txt` 僅含當期，歷史期別要另從 CFTC 的
+- 目前只對過最新一期。`/dea/newcot/` 底下的檔案都僅含當期，歷史期別要另從 CFTC 的
   年度壓縮檔取得。等累積幾期後補一次跨期比對，確認歷史序列沒有被 API 悄悄修訂。
