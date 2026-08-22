@@ -13,8 +13,8 @@
    由 scripts/set_password.py 在本機產生，原文不進版控。 */
 
 const GATE = {
-  salt: '',            // 由 scripts/set_password.py 填入
-  hash: '',            // 同上；留空＝尚未設密碼，直接放行
+  salt: '233cece198304e2a8c6dcbe5fdf20892',            // 由 scripts/set_password.py 填入
+  hash: '2228dfdb7b0d041a26f73b715e6accf9539d6a603943cb9e13a40bbad151720a',            // 同上；留空＝尚未設密碼，直接放行
   iterations: 200000,
   ttlDays: 30,         // 解鎖後記住幾天
   storeKey: 'usp.gate',   // 不可與美國站 'umg.gate'、澳洲站 'amg.gate' 相同：
