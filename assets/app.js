@@ -4,17 +4,24 @@
 'use strict';
 
 const CAT_COLOR = {
+  // TFF 五類
   dealer: 'var(--c-dealer)', asset_mgr: 'var(--c-asset)', lev_money: 'var(--c-lev)',
-  other_rept: 'var(--c-other)', nonrept: 'var(--c-nonrept)'
+  other_rept: 'var(--c-other)', nonrept: 'var(--c-nonrept)',
+  // Legacy 三類。投機沿用槓桿基金的紫、避險沿用資產管理的金——
+  // 兩套分類法性質相近的角色給同一色，切換時視覺上比較好接。
+  noncomm: 'var(--c-lev)', comm: 'var(--c-asset)'
 };
 
 let DATA = null;
 let current = 'ust10y';
 let basis = 'combined';   // combined / futonly / options
+let scheme = 'tff';       // tff / legacy
 
-// 三種口徑共用同一組合約與交易人分類，只是看的是同一批部位的不同切面。
-const L = () => DATA.latest[basis][current];
-const T = () => DATA.trail[basis][current];
+// 兩套分類法 × 三種口徑，看的都是同一批部位的不同切面。
+const L = () => DATA.latest[scheme][basis][current];
+const T = () => DATA.trail[scheme][basis][current];
+const S = () => DATA.schemes.find(x => x.key === scheme);
+const CATS = () => S().categories;
 
 const $ = id => document.getElementById(id);
 const num = n => (n === null || n === undefined) ? '—' : n.toLocaleString('en-US');
@@ -44,12 +51,27 @@ function renderStatus() {
 /* ── 合約切換 ────────────────────────────────────────── */
 function renderChips() {
   $('chips').innerHTML = DATA.contracts.map(c => {
-    const oi = DATA.latest[basis][c.key].oi;
+    const oi = DATA.latest[scheme][basis][c.key].oi;
     return `<button class="chip${c.key === current ? ' on' : ''}" data-k="${c.key}">
       ${c.zh}<span class="sm">OI ${wan(oi)}</span></button>`;
   }).join('');
   $('chips').querySelectorAll('.chip').forEach(b =>
     b.onclick = () => { current = b.dataset.k; render(); });
+}
+
+/* ── 分類法切換 ──────────────────────────────────────── */
+function renderSchemes() {
+  $('schemes').innerHTML = DATA.schemes.map(s =>
+    `<button class="basebtn${s.key === scheme ? ' on' : ''}" data-s="${s.key}"
+       title="${s.note}">${s.zh}</button>`).join('');
+  $('schemes').querySelectorAll('.basebtn').forEach(b =>
+    b.onclick = () => { scheme = b.dataset.s; render(); });
+  const s = S();
+  const n = L().cats[CATS()[0].key].sample;
+  $('schemehint').innerHTML = `${s.note}。本合約此口徑共 ${num(n)} 週樣本。
+    <b>兩套分類法不可互相取代</b>——Legacy 的「商業」對金融期貨是大雜燴，
+    資產管理與交易商都被歸進去，所以它的「非商業淨空」跟 TFF 的「槓桿基金淨空」
+    不是同一件事，數量級也不同。`;
 }
 
 /* ── 口徑切換 ────────────────────────────────────────── */
@@ -68,8 +90,8 @@ function renderM1() {
   const b = DATA.bases.find(x => x.key === basis);
 
   // 選了「期貨＋選擇權」時順便報出選擇權佔多少——這是拆分口徑最直接的用處。
-  const optOI = DATA.latest.options[current].oi;
-  const cbOI = DATA.latest.combined[current].oi;
+  const optOI = DATA.latest[scheme].options[current].oi;
+  const cbOI = DATA.latest[scheme].combined[current].oi;
   const share = basis === 'combined'
     ? `其中選擇權貢獻 <b>${num(optOI)}</b> 口（${(100 * optOI / cbOI).toFixed(1)}%）。` : '';
 
@@ -77,12 +99,12 @@ function renderM1() {
     週變化 <span class="${dir(row.oi_chg)}">${signed(row.oi_chg)}</span>。${share}
     左綠為空方、右紅為多方，長度以同一把尺；價差（spread）部位是同時持有多空的套利腿，不計入淨額。`;
 
-  const scale = Math.max(...DATA.categories.map(cat => {
+  const scale = Math.max(...CATS().map(cat => {
     const v = row.cats[cat.key];
     return Math.max(v.long || 0, v.short || 0);
   }));
 
-  $('m1').innerHTML = DATA.categories.map(cat => {
+  $('m1').innerHTML = CATS().map(cat => {
     const v = row.cats[cat.key];
     const lw = 50 * (v.long || 0) / scale, sw = 50 * (v.short || 0) / scale;
     const pctOI = row.oi ? (100 * v.net / row.oi) : 0;
@@ -113,8 +135,8 @@ function judge(v) {
 function renderM2() {
   const rows = [];
   DATA.contracts.forEach(c => {
-    const r = DATA.latest[basis][c.key];
-    DATA.categories.forEach(cat => {
+    const r = DATA.latest[scheme][basis][c.key];
+    CATS().forEach(cat => {
       const v = r.cats[cat.key];
       if (v.net_chg === null || v.net_chg === undefined) return;
       rows.push({ c, cat, v });
@@ -148,14 +170,14 @@ function renderM3() {
   const row = L();
   const c = DATA.contracts.find(x => x.key === current);
   const b = DATA.bases.find(x => x.key === basis);
-  const sample = row.cats.dealer.sample;
+  const sample = row.cats[CATS()[0].key].sample;
   const firstDate = T()[0].date;
   $('m3note').innerHTML = `<b>${b.zh}</b>口徑。百分位是目前淨部位在<b>該合約該口徑的全歷史</b>中的位置
     （${c.zh}共 ${num(sample)} 週樣本，愈接近 100 代表史上少見的偏多、愈接近 0 代表史上少見的偏空）。
     z 值為近三年的標準差倍數。兩者都用<b>擴張視窗</b>計算，只看該週之前的資料，
     不讓歷史圖上的每一點偷看未來。右圖起點 ${firstDate}。`;
 
-  $('m3gauges').innerHTML = DATA.categories.map(cat => {
+  $('m3gauges').innerHTML = CATS().map(cat => {
     const v = row.cats[cat.key];
     const p = v.pctile;
     return `<div class="gaugerow">
@@ -167,13 +189,14 @@ function renderM3() {
   }).join('');
 
   const trail = T();
-  const series = [
-    { name: '資產管理機構', color: 'var(--c-asset)', pts: trail.map(r => [r.date, r.cats.asset_mgr.net]) },
-    { name: '槓桿基金', color: 'var(--c-lev)', pts: trail.map(r => [r.date, r.cats.lev_money.net]) },
-    { name: '交易商／中介', color: 'var(--c-dealer)', pts: trail.map(r => [r.date, r.cats.dealer.net]) }
-  ];
+  // 取該分類法排前三的類別（TFF 是交易商／資產管理／槓桿基金，Legacy 是投機／避險／小戶）。
+  // 小戶在 TFF 排最後所以自然被排除，在 Legacy 只有三類就全上。
+  const series = CATS().slice(0, 3).map(cat => ({
+    name: cat.zh, color: CAT_COLOR[cat.key],
+    pts: trail.map(r => [r.date, r.cats[cat.key].net])
+  }));
   $('m3chart').innerHTML =
-    `<div style="font-size:12.5px;color:var(--text2);margin-bottom:6px">三大類淨部位（近三年，口）</div>`
+    `<div style="font-size:12.5px;color:var(--text2);margin-bottom:6px">主要類別淨部位（近三年，口）</div>`
     + lineChart(series, { zero: true, fmt: wan })
     + legend(series);
 }
@@ -256,7 +279,7 @@ function legend(series) {
 
 /* ── 進入點 ─────────────────────────────────────────── */
 function render() {
-  renderChips(); renderBases(); renderM1(); renderM2(); renderM3(); renderM4();
+  renderChips(); renderSchemes(); renderBases(); renderM1(); renderM2(); renderM3(); renderM4();
 }
 
 fetch('data/latest.json')

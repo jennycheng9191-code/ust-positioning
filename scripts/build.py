@@ -1,7 +1,7 @@
 """主流程：抓 CFTC 與 FRED、算衍生指標、產出網頁用的 JSON。
 
 產出兩份：
-- data/cot_history.csv   完整週歷史（2006 起），給日後回溯研究用，網頁不載入
+- data/cot_history.csv   完整週歷史（最早 1986 起），給日後回溯研究用，網頁不載入
 - data/latest.json       網頁真正吃的那份，只留最新一期與近三年軌跡
 
 歷史用 CSV 而不是 JSON：這份檔每週重產一次，JSON 版 6.4 MB 且是整檔改寫，
@@ -33,66 +33,71 @@ def next_release(report_date: date) -> date:
     return friday + timedelta(days=7)
 
 
-HIST_COLS = ["date", "basis", "contract", "category", "long", "short", "spread",
+HIST_COLS = ["date", "scheme", "basis", "contract", "category", "long", "short", "spread",
              "net", "net_chg", "pctile", "z", "traders_long", "traders_short", "oi"]
 
 
 def write_history_csv(history: dict) -> None:
-    """長格式：一列一個「報告日 × 口徑 × 合約 × 交易人類別」。
+    """長格式：一列一個「報告日 × 分類法 × 口徑 × 合約 × 交易人類別」。
 
-    basis 欄的值為 combined／futonly／options，要單獨研究選擇權部位就篩 options。
+    scheme 欄為 tff／legacy，basis 欄為 combined／futonly／options。
+    要單獨研究選擇權部位就篩 basis=options；要對照新聞說的「投機客淨部位」，
+    篩 scheme=legacy & category=noncomm。
     """
     path = DATA / "cot_history.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(HIST_COLS)
-        for bkey, by_contract in history.items():
-            for ckey, rows in by_contract.items():
-                for r in rows:
-                    for cat_key, v in r["cats"].items():
-                        w.writerow([r["date"], bkey, ckey, cat_key,
-                                    v["long"], v["short"], v["spread"],
-                                    v.get("net"), v.get("net_chg"), v.get("pctile"), v.get("z"),
-                                    v.get("traders_long"), v.get("traders_short"), r["oi"]])
+        for skey, by_basis in history.items():
+            for bkey, by_contract in by_basis.items():
+                for ckey, rows in by_contract.items():
+                    for r in rows:
+                        for cat_key, v in r["cats"].items():
+                            w.writerow([r["date"], skey, bkey, ckey, cat_key,
+                                        v["long"], v["short"], v["spread"],
+                                        v.get("net"), v.get("net_chg"), v.get("pctile"), v.get("z"),
+                                        v.get("traders_long"), v.get("traders_short"), r["oi"]])
 
 
 def build() -> dict:
-    print("抓取 CFTC COT 合併版（六檔）…")
-    raw_combined = cftc.fetch_all("combined")
-    print("抓取 CFTC COT 僅期貨版（六檔）…")
-    raw_futonly = cftc.fetch_all("futonly")
-
-    # 三種口徑。選擇權那份由前兩者相減得出，不是 CFTC 直接發布的資料。
-    raw = {
-        "combined": raw_combined,
-        "futonly": raw_futonly,
-        "options": {c["key"]: cftc.subtract(raw_combined[c["key"]], raw_futonly[c["key"]])
-                    for c in cftc.CONTRACTS},
-    }
-
     history, latest, trail = {}, {}, {}
-    for b in cftc.BASES:
-        bk = b["key"]
-        history[bk], latest[bk], trail[bk] = {}, {}, {}
-        for c in cftc.CONTRACTS:
-            # 極端度必須每種口徑各自算——選擇權部位的歷史分布跟期貨完全不同，
-            # 拿期貨的百分位去讀選擇權會得到毫無意義的數字。
-            rows = derive.add_extremes(derive.enrich_positions(raw[bk][c["key"]]))
-            history[bk][c["key"]] = rows
-            latest[bk][c["key"]] = rows[-1]
-            trail[bk][c["key"]] = [
-                {
-                    "date": r["date"],
-                    "oi": r["oi"],
-                    "cats": {k: {"net": v.get("net"), "pctile": v.get("pctile"), "z": v.get("z")}
-                             for k, v in r["cats"].items()},
-                }
-                for r in rows[-TRAIL_WEEKS:]
-            ]
-        n = len(history[bk]["ust10y"])
-        oi = latest[bk]["ust10y"]["oi"]
-        print("  %-9s 10 年期 %5d 週，最新未平倉 %s 口" % (b["zh"], n, f"{oi:,}"))
+
+    for skey, scheme in cftc.SCHEMES.items():
+        print("抓取 %s（合併版＋僅期貨版，各六檔）…" % scheme["zh"])
+        raw_combined = cftc.fetch_all(skey, "combined")
+        raw_futonly = cftc.fetch_all(skey, "futonly")
+
+        # 三種口徑。選擇權那份由前兩者相減得出，不是 CFTC 直接發布的資料。
+        raw = {
+            "combined": raw_combined,
+            "futonly": raw_futonly,
+            "options": {c["key"]: cftc.subtract(raw_combined[c["key"]], raw_futonly[c["key"]])
+                        for c in cftc.CONTRACTS},
+        }
+
+        history[skey], latest[skey], trail[skey] = {}, {}, {}
+        for b in cftc.BASES:
+            bk = b["key"]
+            history[skey][bk], latest[skey][bk], trail[skey][bk] = {}, {}, {}
+            for c in cftc.CONTRACTS:
+                # 極端度必須每種分類法、每種口徑各自算——選擇權部位的歷史分布跟期貨
+                # 完全不同，Legacy 的樣本又比 TFF 多 11 年，混用會得到無意義的百分位。
+                rows = derive.add_extremes(derive.enrich_positions(raw[bk][c["key"]]))
+                history[skey][bk][c["key"]] = rows
+                latest[skey][bk][c["key"]] = rows[-1]
+                trail[skey][bk][c["key"]] = [
+                    {
+                        "date": r["date"],
+                        "oi": r["oi"],
+                        "cats": {k: {"net": v.get("net"), "pctile": v.get("pctile"), "z": v.get("z")}
+                                 for k, v in r["cats"].items()},
+                    }
+                    for r in rows[-TRAIL_WEEKS:]
+                ]
+            n = len(history[skey][bk]["ust10y"])
+            oi = latest[skey][bk]["ust10y"]["oi"]
+            print("  %-9s 10 年期 %5d 週，最新未平倉 %s 口" % (b["zh"], n, f"{oi:,}"))
 
     print("抓取 FRED 殖利率…")
     yields = fred.fetch_all()
@@ -103,7 +108,7 @@ def build() -> dict:
         vol[s["key"]]["level"] = yields[s["key"]][-VOL_DAYS:]
         print("  %-4s (%s) 已實現波動 20d=%s bp/年" % (s["key"], s["id"], rv["rv20"][-1][1]))
 
-    report_dates = {k: v["date"] for k, v in latest["combined"].items()}
+    report_dates = {k: v["date"] for k, v in latest["tff"]["combined"].items()}
     newest = max(report_dates.values())
 
     # 刻意不放「本次建置時間」這種欄位。
@@ -127,7 +132,10 @@ def build() -> dict:
         },
         "contracts": cftc.CONTRACTS,
         "bases": cftc.BASES,
-        "categories": [{k: c[k] for k in ("key", "zh", "en")} for c in cftc.CATEGORIES],
+        "schemes": [{"key": k, "zh": v["zh"], "en": v["en"], "note": v["note"],
+                     "categories": [{kk: c[kk] for kk in ("key", "zh", "en")}
+                                    for c in v["categories"]]}
+                    for k, v in cftc.SCHEMES.items()],
         "latest": latest,
         "trail": trail,
         "vol": vol,

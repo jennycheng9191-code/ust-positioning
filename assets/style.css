@@ -50,6 +50,7 @@ h2 .n{color:var(--text3);font-weight:500;margin-right:7px}
 
 /* 口徑切換（期貨＋選擇權／僅期貨／僅選擇權）。
    刻意做得比合約 chips 小一級：合約是主軸，口徑是看同一批部位的三種角度。 */
+.switchrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .bases{display:flex;gap:0;margin:11px 0 2px;border:1px solid var(--border);
   border-radius:8px;overflow:hidden;width:fit-content;max-width:100%}
 .basebtn{background:transparent;border:none;border-right:1px solid var(--border);
