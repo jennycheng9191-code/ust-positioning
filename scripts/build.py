@@ -11,6 +11,7 @@ delta 壓縮後每週只多幾百 bytes；順帶也比較好直接丟進 Excel �
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from datetime import date, timedelta
 
@@ -22,12 +23,17 @@ from common import DATA, write_json
 TRAIL_WEEKS = 156      # 網頁軌跡保留三年
 VOL_DAYS = 780         # 波動度序列保留約三年交易日
 
+# 網頁的「手動更新」按鈕要連到這個 repo 的 update workflow。
+# 寫在這裡而不是寫死在 app.js：前端不該知道自己被部署在哪，
+# 換 repo 或 fork 出去時只要改這一行。Actions 上會用環境變數覆蓋。
+REPO = "jennycheng9191-code/ust-positioning"
+
 
 def next_release(report_date: date) -> date:
     """COT 為週二收盤部位、當週五 15:30 ET 發布，下一期即下週五。
 
     遇美國假日 CFTC 會順延（多為順延至週一），這裡只給預定日，
-    實際過期判定交給 validate.py 的 10 天門檻。
+    實際過期判定交給 validate.py 的 14 天門檻。
     """
     friday = report_date + timedelta(days=(4 - report_date.weekday()) % 7)
     return friday + timedelta(days=7)
@@ -129,6 +135,7 @@ def build() -> dict:
             "source_url": "https://publicreporting.cftc.gov/resource/yw9f-hn96.json",
             "source_url_futonly": "https://publicreporting.cftc.gov/resource/gpe5-46if.json",
             "yield_source": "FRED（DGS2 / DGS5 / DGS10 / DGS30）",
+            "repo": os.environ.get("GITHUB_REPOSITORY") or REPO,
         },
         "contracts": cftc.CONTRACTS,
         "bases": cftc.BASES,

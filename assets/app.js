@@ -39,11 +39,34 @@ function fmtDate(s) {
 /* ── 狀態列 ──────────────────────────────────────────── */
 function renderStatus() {
   const m = DATA.meta;
-  const age = Math.round((Date.now() - new Date(m.report_date + 'T00:00:00')) / 86400000);
-  const stale = age > 14;
+
+  // 判定基準是「下一期該發布了沒」，不是「這份資料幾天前的」。
+  //
+  // 用資料年齡判斷會晚很多：COT 報的是週二部位、週五才發，正常情況下站上永遠是
+  // 三到十天前的數字，看年齡分不出「本來就這樣」和「更新掛了」。改看下期發布日
+  // 有沒有被跨過，自動更新沒起的隔天就看得出來。
+  //
+  // 寬限四天：CFTC 遇美國假日會把發布順延到下週一（+3 天），加上排程本身可能晚幾小時。
+  const daysPastDue = Math.floor(
+    (Date.now() - new Date(m.next_release + 'T00:00:00')) / 86400000);
+  const state = daysPastDue < 0 ? 'ok' : (daysPastDue <= 4 ? 'due' : 'stale');
+
+  const label = {
+    ok: `下期預定 <b>${m.next_release}</b>`,
+    due: `新一期應已發布，等待更新（預定 ${m.next_release}）`,
+    stale: `⚠ 已逾預定發布日 ${daysPastDue} 天仍未更新`
+  }[state];
+
+  const repo = m.repo;
+  const runUrl = `https://github.com/${repo}/actions/workflows/update.yml`;
+
   $('status').innerHTML = `
     <div class="stat">部位日期 <b>${m.report_date}</b>（週二收盤）</div>
-    <div class="stat${stale ? ' warn' : ''}">${stale ? '⚠ 資料可能過期' : '下期預定'} <b>${m.next_release}</b></div>`;
+    <div class="stat${state === 'ok' ? '' : ' warn'}">${label}</div>
+    <a class="btn${state === 'stale' ? ' btn-warn' : ''}" href="${runUrl}"
+       target="_blank" rel="noopener"
+       title="開啟 GitHub Actions，在該頁右上角按 Run workflow 手動觸發一次更新">手動更新 ↗</a>`;
+
   $('srcline').textContent = `本期部位為 ${m.report_date}（週二）收盤，於當週五 15:30 ET 公布；`
     + `殖利率與波動度資料涵蓋至 ${m.yield_date}。`;
 }

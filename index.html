@@ -25,6 +25,10 @@
   .btn:hover{color:var(--text);border-color:var(--text3)}
   .btn:disabled{opacity:.5;cursor:default}
   .btn-primary{color:var(--text);border-color:var(--c-asset)}
+  /* 資料逾期時「手動更新」要跳出來，不能跟旁邊的狀態方塊長得一樣 */
+  .btn-warn{color:var(--warn);border-color:var(--warn)}
+  .btn-warn:hover{color:var(--warn);border-color:var(--warn);background:var(--card2)}
+  a.btn{text-decoration:none}
   .gate-msg{font-size:12px;color:var(--bear);min-height:16px}
 </style>
 <script>document.documentElement.className='locked';</script>
