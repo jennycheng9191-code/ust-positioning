@@ -146,7 +146,7 @@ def check_vol(payload: dict) -> None:
 
         # **比值與價差的合理範圍不同，不可共用一條檢查。**
         # 比值是相除出來的，分母給零或空值會算出 inf／nan，所以必須為正；
-        # 價差是相減，負值完全正常（WTI-Brent 長年是負的），只驗有限。
+        # 價差是相減，負值完全正常（Brent-WTI 有 950／5,135 天是負的），只驗有限。
         vals = [p["now"], p["lo"], p["hi"]]
         if p["op"] == "ratio" and not all(0 < v < 1e6 for v in vals):
             fail(f"{a['key']} 的{p['zh']}是比值卻出現非正數："
