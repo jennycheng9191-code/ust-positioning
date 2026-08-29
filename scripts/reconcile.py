@@ -6,8 +6,9 @@
 校驗基準必須來自外部，不能是自家管線的輸出。
 
 用法：
-    python scripts/reconcile.py                          # 四份全對（直接抓）
-    python scripts/reconcile.py tff combined FinComWk.txt   # 指定其中一份，用本機檔
+    python scripts/reconcile.py                            # 六份全對（直接抓）
+    python scripts/reconcile.py tff combined FinComWk.txt  # 指定其中一份，用本機檔
+    python scripts/reconcile.py disagg combined            # 商品那兩頁走這份
 
 「僅選擇權」口徑不在這裡對——它是本站由合併版減僅期貨版得出的，CFTC 沒有對應的
 原始報告。它的正確性由 validate.py 的三道檢查守住：恆等式（各類多方＋價差＝未平倉量）
@@ -23,10 +24,16 @@ import io
 import sys
 from pathlib import Path
 
-from cftc import CONTRACTS, SCHEMES
+from cftc import ASSETS, SCHEMES
 from common import DATA, get, read_json
 
 BASE = "https://www.cftc.gov/dea/newcot/"
+
+# 哪些資產分頁用哪套分類法。對帳時只挑該分類法涵蓋得到的分頁去比，
+# 例如拿 disagg 的報告去對美債會全部「不在這份報告裡」。
+ASSETS_BY_SCHEME = {
+    s: [a for a in ASSETS if s in a["schemes"]] for s in ("tff", "disagg", "legacy")
+}
 
 # 各報告的欄位位置。這張表是對帳的核心：cftc.py 的欄位對應若接錯，就是在這裡被抓出來。
 #
@@ -34,6 +41,8 @@ BASE = "https://www.cftc.gov/dea/newcot/"
 #   TFF    每類都有 long/short/spread 三欄，五類連續排列
 #   Legacy 只有 noncomm 有 spread；[13][14] 是可報告戶合計，要跳過；
 #          [17] 之後是 old／other 期別的重複區塊，週變化要到 [37] 才開始
+#   Disagg prod_merc 沒有 spread（[8][9] 只有多空兩欄），其餘三類有；
+#          [19][20] 是可報告戶合計，要跳過；週變化區塊自 [55] 起
 REPORTS = {
     "tff": {
         "combined": "FinComWk.txt",
@@ -45,6 +54,18 @@ REPORTS = {
             "lev_money_long": 14, "lev_money_short": 15, "lev_money_spread": 16,
             "other_rept_long": 17, "other_rept_short": 18, "other_rept_spread": 19,
             "nonrept_long": 22, "nonrept_short": 23,
+        },
+    },
+    "disagg": {
+        "combined": "c_disagg.txt",
+        "futonly": "f_disagg.txt",
+        "cols": {
+            "code": 3, "oi": 7, "oi_chg": 55,
+            "prod_merc_long": 8, "prod_merc_short": 9,
+            "swap_long": 10, "swap_short": 11, "swap_spread": 12,
+            "m_money_long": 13, "m_money_short": 14, "m_money_spread": 15,
+            "other_rept_long": 16, "other_rept_short": 17, "other_rept_spread": 18,
+            "nonrept_long": 21, "nonrept_short": 22,
         },
     },
     "legacy": {
@@ -72,13 +93,12 @@ def load_report(scheme: str, basis: str, path: str | None) -> str:
         sys.exit(2)
 
 
-def parse(text: str, code_col: int, min_cols: int) -> dict[str, list[str]]:
+def parse(text: str, code_col: int, min_cols: int, wanted: set[str]) -> dict[str, list[str]]:
     """回傳 {合約代碼: 欄位陣列}。
 
     用 csv 模組解析而不是 split(',')：第一欄的合約名稱與 contract_units
     本身就含逗號，包在引號裡，硬拆會整列錯位。
     """
-    wanted = {c["code"] for c in CONTRACTS}
     out = {}
     for row in csv.reader(io.StringIO(text)):
         if len(row) <= min_cols:
@@ -92,18 +112,21 @@ def parse(text: str, code_col: int, min_cols: int) -> dict[str, list[str]]:
 def reconcile_one(ours: dict, scheme: str, basis: str, path: str | None) -> tuple[int, int]:
     spec = REPORTS[scheme]
     cols = spec["cols"]
+    assets = ASSETS_BY_SCHEME[scheme]
+    contracts = [(a, c) for a in assets for c in a["contracts"]]
     text = load_report(scheme, basis, path)
-    official = parse(text, cols["code"], max(cols.values()))
+    official = parse(text, cols["code"], max(cols.values()),
+                     {c["code"] for _, c in contracts})
     cat_keys = [c["key"] for c in SCHEMES[scheme]["categories"]]
 
     checked = bad = 0
     print(f"\n=== {SCHEMES[scheme]['zh']} ／ {basis}（{spec[basis]}）===")
-    for c in CONTRACTS:
+    for a, c in contracts:
         row = official.get(c["code"])
         if not row:
             print(f"⚠ {c['zh']}（{c['code']}）不在這份報告裡，跳過")
             continue
-        mine = ours["latest"][scheme][basis][c["key"]]
+        mine = ours["latest"][a["key"]][scheme][basis][c["key"]]
 
         def cmp(label, col_key, got):
             nonlocal checked, bad
@@ -113,7 +136,7 @@ def reconcile_one(ours: dict, scheme: str, basis: str, path: str | None) -> tupl
             want = int(row[cols[col_key]].replace(",", ""))
             if want != (got if got is not None else object()):
                 bad += 1
-                print(f"✗ {c['zh']} {label}：官方 {want:,} vs 本站 "
+                print(f"✗ {a['zh']}／{c['zh']} {label}：官方 {want:,} vs 本站 "
                       f"{got if got is None else format(got, ',')}")
 
         cmp("未平倉量", "oi", mine["oi"])
@@ -123,7 +146,7 @@ def reconcile_one(ours: dict, scheme: str, basis: str, path: str | None) -> tupl
             cmp(f"{ck} 多方", f"{ck}_long", v["long"])
             cmp(f"{ck} 空方", f"{ck}_short", v["short"])
             cmp(f"{ck} 價差", f"{ck}_spread", v["spread"])
-        print(f"✓ {c['zh']}（{c['code']}）")
+        print(f"✓ {a['zh']}／{c['zh']}（{c['code']}）")
     return checked, bad
 
 
@@ -138,7 +161,8 @@ def main() -> None:
         scheme, basis = args[0], args[1]
         path = args[2] if len(args) > 2 else None
         if scheme not in REPORTS or basis not in ("combined", "futonly"):
-            print("用法：reconcile.py [tff|legacy] [combined|futonly] [檔案路徑]", file=sys.stderr)
+            print("用法：reconcile.py [tff|disagg|legacy] [combined|futonly] [檔案路徑]",
+                  file=sys.stderr)
             sys.exit(2)
         jobs = [(scheme, basis, path)]
     else:

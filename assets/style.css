@@ -35,12 +35,26 @@ h2 .n{color:var(--text3);font-weight:500;margin-right:7px}
 .stat b{color:var(--text);font-weight:600}
 .stat.warn{border-color:var(--warn);color:var(--warn)}
 
+/* 資產分頁與合約切換共用一個 sticky 容器。
+   兩層各自 sticky 的話，下層的 top 得寫死成上層的高度，字級一變或標籤折行就錯位。 */
+.stickybar{position:sticky;top:0;background:var(--bg);z-index:5;
+  border-bottom:1px solid var(--border);margin:14px 0 4px}
+
+/* 資產分頁：底線式，比合約 chips 高一級。
+   用底線而不是填色方塊——這一層是「你在看哪個市場」，語義上接近瀏覽器分頁，
+   跟下面「選哪一檔合約」的按鈕群要一眼分得出不是同一層。 */
+.assettabs{display:flex;gap:2px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+.atab{background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--text3);font-size:14px;font-weight:600;padding:8px 14px 7px;
+  cursor:pointer;font-family:inherit;white-space:nowrap;min-height:38px}
+.atab:hover{color:var(--text2)}
+.atab.on{color:var(--text);border-bottom-color:var(--c-asset)}
+
 /* 合約切換 */
-/* 單列橫向捲動而不是 wrap：這一排是 sticky 的，若在窄螢幕折成六行，
+/* 單列橫向捲動而不是 wrap：這一排在 sticky 容器內，若在窄螢幕折成六行，
    會把整個視窗上半部吃掉，下面的內容就沒得看了。 */
-.chips{display:flex;gap:7px;flex-wrap:nowrap;overflow-x:auto;margin:14px 0 4px;
-  position:sticky;top:0;background:var(--bg);padding:9px 0;z-index:5;
-  border-bottom:1px solid var(--border);scrollbar-width:thin}
+.chips{display:flex;gap:7px;flex-wrap:nowrap;overflow-x:auto;
+  background:var(--bg);padding:9px 0;scrollbar-width:thin}
 .chip{border:1px solid var(--border);background:var(--card);color:var(--text2);font-size:13px;
   padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap}
 .chip:hover{color:var(--text);border-color:var(--text3)}

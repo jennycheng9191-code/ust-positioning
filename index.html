@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>美債部位與波動追蹤</title>
+<title>部位與波動追蹤</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2312101A'/><path d='M5 24 L5 16 M12 24 L12 9 M19 24 L19 19 M26 24 L26 6' stroke='%23C9913A' stroke-width='3.4' fill='none' stroke-linecap='round'/></svg>">
 <link rel="stylesheet" href="assets/style.css">
 <style>
@@ -37,13 +37,18 @@
 
 <header>
   <div>
-    <h1>美債部位與波動追蹤</h1>
-    <div class="sub">CFTC 期貨＋選擇權合併部位 ‧ 六檔美債合約 ‧ 五類交易人</div>
+    <h1>部位與波動追蹤</h1>
+    <div class="sub" id="sub"></div>
   </div>
   <div class="statusbar" id="status"></div>
 </header>
 
-<div class="chips" id="chips"></div>
+<!-- 資產分頁與合約 chips 包在同一個 sticky 容器裡：
+     兩層各自 sticky 會需要把下層的 top 寫死成上層的高度，字級或折行一變就錯位。 -->
+<div class="stickybar">
+  <div class="assettabs" id="assets"></div>
+  <div class="chips" id="chips"></div>
+</div>
 <div class="switchrow">
   <div class="bases" id="schemes"></div>
   <div class="bases" id="bases"></div>
@@ -55,8 +60,7 @@
 <div class="card" id="m1"></div>
 
 <h2><span class="n">M2</span>本週誰在加倉</h2>
-<div class="note">依「淨部位變化」的絕對值排序，六檔 × 五類全部納入。
-  多方變化與空方變化分開列——同樣是淨部位轉多，「新增多單」和「空單回補」的意義完全不同。</div>
+<div class="note" id="m2note"></div>
 <div class="card scroll" id="m2"></div>
 
 <h2><span class="n">M3</span>部位極端度</h2>
@@ -67,16 +71,13 @@
 </div>
 
 <h2><span class="n">M4</span>已實現波動</h2>
-<div class="note">殖利率日變動的滾動標準差，年化後以 bp 表示。
-  這是<b>已實現</b>波動，不是選擇權隱含波動——它講的是市場已經走過什麼，不是市場預期什麼。</div>
+<div class="note" id="m4note"></div>
 <div class="card" id="m4"></div>
 
 <footer>
   <div id="srcline"></div>
-  <div>部位資料：CFTC Commitments of Traders — Traders in Financial Futures（期貨＋選擇權合併版）。
-    合併版把選擇權部位以 delta 加權併入，故本站的「部位」已包含選擇權的方向性曝險。</div>
-  <div>殖利率：FRED（DGS2 / DGS5 / DGS10 / DGS30），原始資料為美國財政部 CMT 殖利率。</div>
-  <div>兩者皆為美國聯邦政府公開資料。本頁僅供參考，不構成投資建議。</div>
+  <div id="srcnotes"></div>
+  <div>本頁僅供參考，不構成投資建議。</div>
 </footer>
 
 <!-- gate.js 驗證通過後才會載入 assets/app.js -->

@@ -1,40 +1,47 @@
-/* 美債部位與波動追蹤 — 前端渲染。
+/* 部位與波動追蹤 — 前端渲染。
    不引任何外部圖表庫：資料量小、圖形單純，inline SVG 自己畫就夠，
-   也省掉一個離線／CSP 會壞掉的相依。 */
+   也省掉一個離線／CSP 會壞掉的相依。
+
+   三個資產分頁（美債／原油／貴金屬）共用同一套模組，差異全部由 latest.json 決定——
+   哪些合約、哪幾套分類法、波動度用什麼單位、頁尾寫什麼來源，前端一律照 payload 渲染，
+   不在這裡寫任何 if (asset === 'oil')。加第四個分頁時只要動 scripts/cftc.py。 */
 'use strict';
 
 const CAT_COLOR = {
-  // TFF 五類
+  // TFF 五類（美債）
   dealer: 'var(--c-dealer)', asset_mgr: 'var(--c-asset)', lev_money: 'var(--c-lev)',
   other_rept: 'var(--c-other)', nonrept: 'var(--c-nonrept)',
-  // Legacy 三類。投機沿用槓桿基金的紫、避險沿用資產管理的金——
-  // 兩套分類法性質相近的角色給同一色，切換時視覺上比較好接。
+  // Disagg 五類（商品）。跨分類法用「角色相同給同一色」對齊：
+  //   投機資金   槓桿基金 → 管理基金 → 非商業   全部用紫
+  //   避險／實需 資產管理 → 生產商   → 商業     全部用金
+  //   中介       交易商   → 交換商             全部用藍
+  // 切分頁或切分類法時，同一個角色的線不會換色，眼睛不用重新對照圖例。
+  prod_merc: 'var(--c-asset)', swap: 'var(--c-dealer)', m_money: 'var(--c-lev)',
+  // Legacy 三類（共用）
   noncomm: 'var(--c-lev)', comm: 'var(--c-asset)'
 };
 
 let DATA = null;
+let asset = 'ust';
 let current = 'ust10y';
 let basis = 'combined';   // combined / futonly / options
-let scheme = 'tff';       // tff / legacy
+let scheme = 'tff';       // tff / disagg / legacy
 
-// 兩套分類法 × 三種口徑，看的都是同一批部位的不同切面。
-const L = () => DATA.latest[scheme][basis][current];
-const T = () => DATA.trail[scheme][basis][current];
-const S = () => DATA.schemes.find(x => x.key === scheme);
+const A = () => DATA.assets.find(x => x.key === asset);
+const L = () => DATA.latest[asset][scheme][basis][current];
+const T = () => DATA.trail[asset][scheme][basis][current];
+const S = () => DATA.schemes[scheme];
 const CATS = () => S().categories;
+const CONTRACT = () => A().contracts.find(x => x.key === current);
 
 const $ = id => document.getElementById(id);
 const num = n => (n === null || n === undefined) ? '—' : n.toLocaleString('en-US');
 const signed = n => (n === null || n === undefined) ? '—' : (n > 0 ? '+' : '') + n.toLocaleString('en-US');
 const wan = n => (n === null || n === undefined) ? '—'
   : (Math.abs(n) >= 10000 ? (n / 10000).toFixed(1) + ' 萬' : n.toLocaleString('en-US'));
-// 淨多＝押債價漲＝利多債市＝紅；淨空＝綠。與另外兩個站的語義一致。
+// 淨多＝押標的價格上漲＝紅；淨空＝綠。美債頁的「債價漲」就是利多債市，
+// 商品頁的「油價／金價漲」語義相同，所以三個分頁共用同一組顏色，不必換。
 const dir = n => n > 0 ? 'bull' : (n < 0 ? 'bear' : 'dim');
-
-function fmtDate(s) {
-  const d = new Date(s + 'T00:00:00');
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
 
 /* ── 狀態列 ──────────────────────────────────────────── */
 function renderStatus() {
@@ -57,8 +64,7 @@ function renderStatus() {
     stale: `⚠ 已逾預定發布日 ${daysPastDue} 天仍未更新`
   }[state];
 
-  const repo = m.repo;
-  const runUrl = `https://github.com/${repo}/actions/workflows/update.yml`;
+  const runUrl = `https://github.com/${m.repo}/actions/workflows/update.yml`;
 
   $('status').innerHTML = `
     <div class="stat">部位日期 <b>${m.report_date}</b>（週二收盤）</div>
@@ -66,15 +72,33 @@ function renderStatus() {
     <a class="btn${state === 'stale' ? ' btn-warn' : ''}" href="${runUrl}"
        target="_blank" rel="noopener"
        title="開啟 GitHub Actions，在該頁右上角按 Run workflow 手動觸發一次更新">手動更新 ↗</a>`;
+}
 
-  $('srcline').textContent = `本期部位為 ${m.report_date}（週二）收盤，於當週五 15:30 ET 公布；`
-    + `殖利率與波動度資料涵蓋至 ${m.yield_date}。`;
+/* ── 資產分頁 ────────────────────────────────────────── */
+function renderAssets() {
+  $('assets').innerHTML = DATA.assets.map(a =>
+    `<button class="atab${a.key === asset ? ' on' : ''}" data-a="${a.key}">${a.zh}</button>`
+  ).join('');
+  $('assets').querySelectorAll('.atab').forEach(b =>
+    b.onclick = () => switchAsset(b.dataset.a));
+  $('sub').textContent = A().sub;
+}
+
+function switchAsset(key) {
+  asset = key;
+  const a = A();
+  current = a.default_contract;
+  // 分類法不能沿用：美債的 tff 在商品頁不存在，商品的 disagg 在美債頁也不存在。
+  // 口徑（combined／futonly／options）三頁通用，故保留使用者原本的選擇。
+  scheme = a.schemes[0];
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /* ── 合約切換 ────────────────────────────────────────── */
 function renderChips() {
-  $('chips').innerHTML = DATA.contracts.map(c => {
-    const oi = DATA.latest[scheme][basis][c.key].oi;
+  $('chips').innerHTML = A().contracts.map(c => {
+    const oi = DATA.latest[asset][scheme][basis][c.key].oi;
     return `<button class="chip${c.key === current ? ' on' : ''}" data-k="${c.key}">
       ${c.zh}<span class="sm">OI ${wan(oi)}</span></button>`;
   }).join('');
@@ -84,17 +108,17 @@ function renderChips() {
 
 /* ── 分類法切換 ──────────────────────────────────────── */
 function renderSchemes() {
-  $('schemes').innerHTML = DATA.schemes.map(s =>
-    `<button class="basebtn${s.key === scheme ? ' on' : ''}" data-s="${s.key}"
-       title="${s.note}">${s.zh}</button>`).join('');
+  $('schemes').innerHTML = A().schemes.map(k =>
+    `<button class="basebtn${k === scheme ? ' on' : ''}" data-s="${k}"
+       title="${DATA.schemes[k].note}">${DATA.schemes[k].zh}</button>`).join('');
   $('schemes').querySelectorAll('.basebtn').forEach(b =>
     b.onclick = () => { scheme = b.dataset.s; render(); });
-  const s = S();
+
   const n = L().cats[CATS()[0].key].sample;
-  $('schemehint').innerHTML = `${s.note}。本合約此口徑共 ${num(n)} 週樣本。
-    <b>兩套分類法不可互相取代</b>——Legacy 的「商業」對金融期貨是大雜燴，
-    資產管理與交易商都被歸進去，所以它的「非商業淨空」跟 TFF 的「槓桿基金淨空」
-    不是同一件事，數量級也不同。`;
+  // 同一套 Legacy 在美債與商品上的可信度天差地遠，所以提醒文字是
+  // 「分類法 × 資產」兩個維度決定的，由 build.py 帶進 payload。
+  const note = DATA.scheme_notes[`${scheme}|${asset}`] || '';
+  $('schemehint').innerHTML = `${S().note}。本合約此口徑共 ${num(n)} 週樣本。${note}`;
 }
 
 /* ── 口徑切換 ────────────────────────────────────────── */
@@ -109,18 +133,22 @@ function renderBases() {
 /* ── M1 部位結構 ─────────────────────────────────────── */
 function renderM1() {
   const row = L();
-  const c = DATA.contracts.find(x => x.key === current);
+  const c = CONTRACT();
   const b = DATA.bases.find(x => x.key === basis);
 
   // 選了「期貨＋選擇權」時順便報出選擇權佔多少——這是拆分口徑最直接的用處。
-  const optOI = DATA.latest[scheme].options[current].oi;
-  const cbOI = DATA.latest[scheme].combined[current].oi;
+  const optOI = DATA.latest[asset][scheme].options[current].oi;
+  const cbOI = DATA.latest[asset][scheme].combined[current].oi;
   const share = basis === 'combined'
     ? `其中選擇權貢獻 <b>${num(optOI)}</b> 口（${(100 * optOI / cbOI).toFixed(1)}%）。` : '';
+  // 合約規格差很多——一口 WTI 是 1,000 桶、一口黃金是 100 盎司，
+  // 跨商品比較「口數」沒有意義，把單位擺出來提醒。
+  const units = row.units ? `<span class="dim">合約單位 ${row.units}</span>` : '';
 
   $('m1note').innerHTML = `${c.zh}合約 · <b>${b.zh}</b>，未平倉量 <b>${num(row.oi)}</b> 口，
     週變化 <span class="${dir(row.oi_chg)}">${signed(row.oi_chg)}</span>。${share}
-    左綠為空方、右紅為多方，長度以同一把尺；價差（spread）部位是同時持有多空的套利腿，不計入淨額。`;
+    左綠為空方、右紅為多方，長度以同一把尺；價差（spread）部位是同時持有多空的套利腿，不計入淨額。
+    ${units}`;
 
   const scale = Math.max(...CATS().map(cat => {
     const v = row.cats[cat.key];
@@ -157,8 +185,8 @@ function judge(v) {
 
 function renderM2() {
   const rows = [];
-  DATA.contracts.forEach(c => {
-    const r = DATA.latest[scheme][basis][c.key];
+  A().contracts.forEach(c => {
+    const r = DATA.latest[asset][scheme][basis][c.key];
     CATS().forEach(cat => {
       const v = r.cats[cat.key];
       if (v.net_chg === null || v.net_chg === undefined) return;
@@ -168,6 +196,12 @@ function renderM2() {
   rows.sort((a, b) => Math.abs(b.v.net_chg) - Math.abs(a.v.net_chg));
 
   const bz = DATA.bases.find(x => x.key === basis).zh;
+  // 排行涵蓋「本分頁的所有合約 × 本分類法的所有類別」，數量隨分頁而異，
+  // 所以這行字要算出來，不能寫死成「六檔 × 五類」。
+  $('m2note').innerHTML = `依「淨部位變化」的絕對值排序，本頁
+    ${A().contracts.length} 檔 × ${CATS().length} 類全部納入。
+    多方變化與空方變化分開列——同樣是淨部位轉多，「新增多單」和「空單回補」的意義完全不同。`;
+
   $('m2').innerHTML = `<div style="font-size:12.5px;color:var(--text2);margin-bottom:9px">
       口徑：<b>${bz}</b></div>
     <table>
@@ -191,7 +225,7 @@ function renderM2() {
 /* ── M3 極端度 ──────────────────────────────────────── */
 function renderM3() {
   const row = L();
-  const c = DATA.contracts.find(x => x.key === current);
+  const c = CONTRACT();
   const b = DATA.bases.find(x => x.key === basis);
   const sample = row.cats[CATS()[0].key].sample;
   const firstDate = T()[0].date;
@@ -212,8 +246,9 @@ function renderM3() {
   }).join('');
 
   const trail = T();
-  // 取該分類法排前三的類別（TFF 是交易商／資產管理／槓桿基金，Legacy 是投機／避險／小戶）。
-  // 小戶在 TFF 排最後所以自然被排除，在 Legacy 只有三類就全上。
+  // 取該分類法排前三的類別。TFF 是交易商／資產管理／槓桿基金，
+  // Disagg 是生產商／交換商／管理基金，Legacy 只有三類就全上。
+  // 兩套五類法的第四、五類（其他可報告戶、小戶）量體小，畫上去只會壓縮縱軸。
   const series = CATS().slice(0, 3).map(cat => ({
     name: cat.zh, color: CAT_COLOR[cat.key],
     pts: trail.map(r => [r.date, r.cats[cat.key].net])
@@ -226,25 +261,40 @@ function renderM3() {
 
 /* ── M4 已實現波動 ──────────────────────────────────── */
 function renderM4() {
-  const map = [
-    { k: 'y2', name: '2 年期', color: 'var(--c-dealer)' },
-    { k: 'y10', name: '10 年期', color: 'var(--c-asset)' },
-    { k: 'y30', name: '30 年期', color: 'var(--c-lev)' }
-  ];
-  const series = map.map(m => ({
-    name: m.name, color: m.color, pts: DATA.vol[m.k].rv20
+  const a = A();
+  const spec = a.vol;
+  const vol = DATA.vol[asset];
+
+  $('m4note').innerHTML = spec.note;
+
+  const series = spec.plot.map(k => ({
+    name: vol[k].zh, color: vol[k].color, pts: vol[k].rv20
   }));
-  const now = map.map(m => {
-    const rv20 = DATA.vol[m.k].rv20, rv60 = DATA.vol[m.k].rv60;
-    return `<div class="stat">${m.name} <b>${rv20[rv20.length - 1][1]}</b> bp／年
-      <span class="dim">（60 日 ${rv60[rv60.length - 1][1]}）</span></div>`;
+
+  const now = spec.plot.map(k => {
+    const s = vol[k];
+    const rv20 = s.rv20[s.rv20.length - 1][1];
+    const rv60 = s.rv60[s.rv60.length - 1][1];
+    // 價格類的分頁順帶報出最新價位——看波動度時第一個會想問的就是「現在多少錢」。
+    const level = spec.kind === 'price'
+      ? ` <span class="dim">｜ ${s.level[s.level.length - 1][1]} ${s.unit}</span>` : '';
+    return `<div class="stat">${s.zh} <b>${rv20}</b> ${spec.unit}
+      <span class="dim">（60 日 ${rv60}）</span>${level}</div>`;
   }).join('');
 
   $('m4').innerHTML = `<div class="statusbar" style="justify-content:flex-start;margin-bottom:10px">${now}</div>`
-    + lineChart(series, { fmt: v => v + ' bp' })
+    + lineChart(series, { fmt: v => v + (spec.kind === 'price' ? '%' : ' bp') })
     + legend(series)
     + `<div class="note" style="margin:10px 0 0">20 日滾動窗；60 日值列在上方數字後方供對照。
-       20 日明顯高於 60 日＝波動正在放大。</div>`;
+       20 日明顯高於 60 日＝波動正在放大。資料涵蓋至 ${spec.date}。</div>`;
+}
+
+/* ── 頁尾來源 ───────────────────────────────────────── */
+function renderFooter() {
+  const m = DATA.meta;
+  $('srcline').textContent = `本期部位為 ${m.report_date}（週二）收盤，於當週五 15:30 ET 公布；`
+    + `本頁的價格／殖利率資料涵蓋至 ${A().vol.date}。`;
+  $('srcnotes').innerHTML = A().source_note.map(t => `<div>${t}</div>`).join('');
 }
 
 /* ── SVG 折線圖 ─────────────────────────────────────── */
@@ -259,7 +309,11 @@ function lineChart(series, opt) {
   let y0 = Math.min(...ys), y1 = Math.max(...ys);
   if (opt.zero) { y0 = Math.min(y0, 0); y1 = Math.max(y1, 0); }
   const pad = (y1 - y0) * 0.08 || 1;
+  const rawMin = Math.min(...ys);
   y0 -= pad; y1 += pad;
+  // 全正的序列（波動度就是）不讓留白把軸推到零以下——刻度出現「−2%」會被讀成
+  // 真的有負波動。zero 模式是淨部位圖，本來就要跨零軸，不套這條。
+  if (!opt.zero && rawMin >= 0) y0 = Math.max(y0, 0);
 
   const px = t => PL + (W - PL - PR) * (t - x0) / (x1 - x0 || 1);
   const py = v => PT + (H - PT - PB) * (1 - (v - y0) / (y1 - y0 || 1));
@@ -302,12 +356,21 @@ function legend(series) {
 
 /* ── 進入點 ─────────────────────────────────────────── */
 function render() {
-  renderChips(); renderSchemes(); renderBases(); renderM1(); renderM2(); renderM3(); renderM4();
+  renderAssets(); renderChips(); renderSchemes(); renderBases();
+  renderM1(); renderM2(); renderM3(); renderM4(); renderFooter();
 }
 
 fetch('data/latest.json')
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-  .then(d => { DATA = d; renderStatus(); render(); })
+  .then(d => {
+    DATA = d;
+    // 預設分頁與預設合約都以 payload 為準，不寫死在這裡——
+    // 日後把 ASSETS 的順序調換或改預設合約，前端不用跟著改。
+    asset = d.assets[0].key;
+    current = d.assets[0].default_contract;
+    scheme = d.assets[0].schemes[0];
+    renderStatus(); render();
+  })
   .catch(e => {
     document.body.insertAdjacentHTML('afterbegin',
       `<div class="card" style="border-color:var(--warn);color:var(--warn);margin-bottom:14px">

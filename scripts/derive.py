@@ -104,6 +104,31 @@ def realised_vol(series: list[list], windows=(20, 60)) -> dict:
         d_cur, v_cur = series[i]
         diffs.append([d_cur, (v_cur - v_prev) * 100.0])   # 百分點 → bp
 
+    return _roll_annualise(diffs, windows)
+
+
+def realised_vol_price(series: list[list], windows=(20, 60)) -> dict:
+    """價格的已實現波動。
+
+    輸入為 [[日期, 價格], ...]。取日對數報酬（%），滾動標準差年化後以 %／年 表示。
+    這跟 realised_vol() 的殖利率版**不是同一個單位，也不可並排比較**——
+    債券波動講的是殖利率走了幾個 bp，商品波動講的是價格漲跌了百分之幾。
+
+    非正價格一律略過：WTI 在 2020-04-20 出現過負結算價（DCOILWTICO 為 −36.98），
+    取對數會直接丟 ValueError 把整條管線炸掉。跳過該日並連帶跳過與它相鄰的兩筆報酬——
+    那兩天的「報酬率」在數學上沒有意義，不該混進標準差裡。
+    """
+    rets = []
+    for i in range(1, len(series)):
+        p_prev, p_cur = series[i - 1][1], series[i][1]
+        if p_prev is None or p_cur is None or p_prev <= 0 or p_cur <= 0:
+            continue
+        rets.append([series[i][0], math.log(p_cur / p_prev) * 100.0])
+    return _roll_annualise(rets, windows)
+
+
+def _roll_annualise(diffs: list[list], windows) -> dict:
+    """對 [[日期, 日變動], ...] 做滾動母體標準差並年化。兩個波動度函式共用。"""
     out = {f"rv{w}": [] for w in windows}
     for w in windows:
         for i in range(len(diffs)):

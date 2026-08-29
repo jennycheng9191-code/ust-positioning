@@ -15,7 +15,7 @@ permissions:
   pages: write
   id-token: write
 
-# 排隊而不是互相取消。「更新美債部位資料」推完資料會緊接著 dispatch 這裡，
+# 排隊而不是互相取消。「更新部位資料」推完資料會緊接著 dispatch 這裡，
 # cancel-in-progress 會把前一次砍在半路。
 concurrency:
   group: pages

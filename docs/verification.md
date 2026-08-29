@@ -12,17 +12,24 @@ Socrata API（`publicreporting.cftc.gov`）與純文字報告（`cftc.gov/dea/ne
 
 四份官方原始報告：
 
-| 分類法 | 口徑 | 檔案 | 每份比對數字 |
-|:--|:--|:--|--:|
-| TFF | 合併版 | `FinComWk.txt` | 96 |
-| TFF | 僅期貨 | `FinFutWk.txt` | 96 |
-| Legacy | 合併版 | `deacom.txt` | 54 |
-| Legacy | 僅期貨 | `deafut.txt` | 54 |
+六份官方原始報告（含 2026-08-29 加入原油與貴金屬分頁後的 Disagg 兩份）：
 
-兩套分類法的檔案格式不同，欄位位置不能共用（見 `reconcile.py` 的 `REPORTS`）：
-TFF 每類都有 long／short／spread 三欄、五類連續排列；Legacy 只有 noncomm 有 spread，
-第 13、14 欄是可報告戶合計要跳過，第 17 欄之後還有 old／other 期別的重複區塊，
-週變化要到第 37 欄才開始。
+| 分類法 | 口徑 | 檔案 | 涵蓋分頁 | 每份比對數字 |
+|:--|:--|:--|:--|--:|
+| TFF | 合併版 | `FinComWk.txt` | 美債 | 96 |
+| TFF | 僅期貨 | `FinFutWk.txt` | 美債 | 96 |
+| Disagg | 合併版 | `c_disagg.txt` | 原油、貴金屬 | 45 |
+| Disagg | 僅期貨 | `f_disagg.txt` | 原油、貴金屬 | 45 |
+| Legacy | 合併版 | `deacom.txt` | 三頁全部 | 81 |
+| Legacy | 僅期貨 | `deafut.txt` | 三頁全部 | 81 |
+
+三套分類法的檔案格式都不同，欄位位置不能共用（見 `reconcile.py` 的 `REPORTS`）：
+
+- **TFF** 每類都有 long／short／spread 三欄、五類連續排列，週變化自第 24 欄起。
+- **Legacy** 只有 noncomm 有 spread，第 13、14 欄是可報告戶合計要跳過，
+  第 17 欄之後還有 old／other 期別的重複區塊，週變化要到第 37 欄才開始。
+- **Disagg** prod_merc 沒有 spread（第 8、9 欄只有多空兩欄），其餘三類有；
+  第 19、20 欄是可報告戶合計要跳過，週變化自第 55 欄起。
 
 重跑方式：
 
@@ -100,6 +107,50 @@ python scripts/reconcile.py legacy combined deacom.txt # 指定一份，用本�
 
 「僅選擇權」口徑仍無官方報告可對（CFTC 不發這份），其正確性由內在檢查守住，見下節。
 
+### 2026-08-29 — 加入原油與貴金屬分頁，六份報告全數對帳
+
+報告日 2026-08-25。三個分頁 × 三套分類法 × 兩種官方口徑，一次全對：
+
+| 分類法 | 口徑 | 對帳來源 | 比對數字 | 不符 |
+|:--|:--|:--|--:|--:|
+| TFF | 合併版 | `FinComWk.txt` | 96 | **0** |
+| TFF | 僅期貨 | `FinFutWk.txt` | 96 | **0** |
+| Disagg | 合併版 | `c_disagg.txt` | 45 | **0** |
+| Disagg | 僅期貨 | `f_disagg.txt` | 45 | **0** |
+| Legacy | 合併版 | `deacom.txt` | 81 | **0** |
+| Legacy | 僅期貨 | `deafut.txt` | 81 | **0** |
+| | | **合計** | **444** | **0** |
+
+抽樣（COMEX GOLD `088691`，2026-08-25，Disagg 合併版）：
+
+| 欄位 | 官方報告 | 本站 |
+|:--|--:|--:|
+| 未平倉量 | 644,992 | 同 |
+| 生產商／貿易商 多／空 | 25,729 / 57,937 | 同 |
+| 交換商 多／空／價差 | 15,147 / 262,299 / 64,557 | 同 |
+| 管理基金 多／空／價差 | 163,217 / 11,902 / 50,823 | 同 |
+| 其他可報告戶 多／空／價差 | 109,916 / 19,019 / 152,860 | 同 |
+| 非報告小戶 多／空 | 62,742 / 25,593 | 同 |
+
+這一輪對帳最重要的產出是**確認 Disagg 的欄位對應沒接錯**，有兩個坑本來很容易踩：
+
+1. **兩個資料集代號與 TFF 的排列相反**——`kh3c-gbw2` 才是合併版，`72hh-3qpy` 是僅期貨版。
+   接反了兩份資料各自的恆等式與零和都仍成立，`validate.py` 抓不出來，
+   只會在「選擇權未平倉量是負的」時才浮現，而那時已經很難回想是哪裡反了。
+2. **CFTC 資料集本身的欄位拼字錯誤**——`swap__positions_short_all` 與
+   `swap__positions_spread_all` 是雙底線，多方欄 `swap_positions_long_all` 卻只有一個。
+   若「順手修正」成單底線，抓到的會是一整排 `None`，而恆等式檢查因為分母也跟著少
+   **驗不出來**。這正是「校驗基準必須來自外部」的具體例子。
+
+兩者都已由 `test_transform.py` 的 `test_disagg_datasets_not_swapped` 與
+`test_disagg_field_names_keep_cftc_typos` 釘死。
+
+價格資料無法用同一套方式對帳（FRED 與 LBMA 都只有單一發布管道），
+改以 `validate.py` 的合理性檢查守住：序列齊全、日期夠新、最新值是有限的非負數。
+最後一項擋的是價格出現零或負值時算出的 `nan`／`inf`——WTI 在 2020-04-20 真的有過
+負結算價（`DCOILWTICO` 為 −36.98），`derive.realised_vol_price()` 會整筆跳過，
+並有 `test_realised_vol_price_survives_negative_wti` 釘住。
+
 ## 常設的內在一致性檢查
 
 除了對外比對，`scripts/validate.py` 每次建置都會驗三條，全部不依賴外部連線，
@@ -112,7 +163,10 @@ python scripts/reconcile.py legacy combined deacom.txt # 指定一份，用本�
 3. **選擇權範圍**：相減出來的選擇權未平倉量必須落在 0 與合併版之間。
    超出範圍指向兩份報告的期別沒對齊。
 
-三者對兩套分類法 × 三種口徑 × 六檔全數成立。
+三者對三個分頁 × 各自的兩套分類法 × 三種口徑 × 全部九檔合約成立。
+
+第 4 條（2026-08-29 新增）是**波動度合理性**：各分頁該畫的序列都在、
+價格／殖利率日期距今不超過 10 天、最新的 20 日與 60 日已實現波動是有限的非負數。
 
 ## 待辦
 

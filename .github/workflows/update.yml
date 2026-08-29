@@ -1,4 +1,4 @@
-name: 更新美債部位資料
+name: 更新部位資料
 
 on:
   schedule:

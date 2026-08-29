@@ -66,7 +66,7 @@ function renderGate() {
   box.id = 'gate';
   box.innerHTML = `
     <form id="gateform" autocomplete="off">
-      <div class="gate-title">美債部位與波動追蹤</div>
+      <div class="gate-title">部位與波動追蹤</div>
       <div class="gate-sub">請輸入密碼</div>
       <input id="gatepw" type="password" autocomplete="current-password"
              autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="密碼">

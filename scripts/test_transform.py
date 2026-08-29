@@ -8,8 +8,9 @@ import math
 import sys
 from datetime import date
 
+import cftc
 import derive
-from build import next_release
+from build import VOL_COLORS, VOL_PLOT, VOL_SPEC, next_release
 from cftc import _num, normalise, subtract
 
 
@@ -96,6 +97,88 @@ def test_realised_vol():
     check("年化係數為 sqrt(252)", rv2["rv20"][-1][1], expect)
 
 
+def test_realised_vol_price():
+    """商品波動走的是對數報酬，年化後單位是 %／年，不是 bp。"""
+    flat = [[f"2026-01-{d:02d}", 80.0] for d in range(1, 26)]
+    rv = derive.realised_vol_price(flat, windows=(20,))
+    check("價格不動時波動為 0", rv["rv20"][-1][1], 0.0)
+
+    # 每日 +1% 複利：對數報酬固定，標準差仍為 0（這正是用對數報酬的理由，
+    # 簡單報酬在等比序列上也會是 0，但在大跌時會低估）
+    geo = [[f"2026-01-{d:02d}", 80.0 * (1.01 ** d)] for d in range(1, 26)]
+    rv2 = derive.realised_vol_price(geo, windows=(20,))
+    check("等比序列的已實現波動為 0", rv2["rv20"][-1][1], 0.0)
+
+
+def test_realised_vol_price_survives_negative_wti():
+    """WTI 2020-04-20 的負結算價會讓 log() 直接丟 ValueError。
+
+    這是真的會發生的資料，不是假想——DCOILWTICO 當日為 −36.98。
+    非正價格必須整筆跳過，而不是讓整條管線炸掉或算出 nan。
+    """
+    series = [["2026-01-01", 20.0], ["2026-01-02", -37.0], ["2026-01-03", 15.0],
+              ["2026-01-04", 16.0], ["2026-01-05", 17.0]]
+    # 窗長取 1 是為了讓每一筆有效報酬都各自產出一點，直接看得到哪些日期入了列
+    rv = derive.realised_vol_price(series, windows=(1,))
+    dates = [p[0] for p in rv["rv1"]]
+    check("負價當日與其相鄰報酬都不入列", dates, ["2026-01-04", "2026-01-05"])
+    check("算得出有限的數字", all(0 <= p[1] < 1e6 for p in rv["rv1"]), True)
+
+
+def test_disagg_field_names_keep_cftc_typos():
+    """CFTC 資料集本身的欄位拼字錯誤必須照抄，不可「順手修正」。
+
+    swap 的空方與價差是兩個底線、多方是一個；noncomm 的 spread 少一個 r。
+    這些若被改成看起來正確的名字，抓到的會是一整排 None，
+    而 validate.py 的恆等式檢查會因為分母也跟著少而**驗不出來**。
+    """
+    swap = next(c for c in cftc.DISAGG_CATEGORIES if c["key"] == "swap")
+    check("swap 空方欄雙底線", swap["short"], "swap__positions_short_all")
+    check("swap 價差欄雙底線", swap["spread"], "swap__positions_spread_all")
+    check("swap 多方欄單底線", swap["long"], "swap_positions_long_all")
+
+    pm = next(c for c in cftc.DISAGG_CATEGORIES if c["key"] == "prod_merc")
+    check("生產商沒有價差欄位", pm["spread"], None)
+
+    noncomm = next(c for c in cftc.LEGACY_CATEGORIES if c["key"] == "noncomm")
+    check("noncomm 價差欄照抄 CFTC 拼字", noncomm["spread"], "noncomm_positions_spread")
+
+
+def test_disagg_datasets_not_swapped():
+    """Disagg 的合併版是 kh3c-gbw2，與 TFF 的排列相反。
+
+    接反了兩份資料各自的恆等式仍成立，validate.py 抓不出來——
+    只會看到「選擇權未平倉量是負的」，而那時已經很難回想是哪裡反了。
+    所以在這裡釘死代號。
+    """
+    check("disagg 合併版代號", cftc.SCHEMES["disagg"]["datasets"]["combined"], "kh3c-gbw2")
+    check("disagg 僅期貨版代號", cftc.SCHEMES["disagg"]["datasets"]["futonly"], "72hh-3qpy")
+    check("tff 合併版代號", cftc.SCHEMES["tff"]["datasets"]["combined"], "yw9f-hn96")
+
+
+def test_assets_are_self_consistent():
+    """分頁設定與其他模組對得上：分類法存在、預設合約在清單裡、波動度規格齊全。
+
+    擋的是「加了一個分頁但忘了補某張表」——那類錯誤要跑完整條抓取管線才會浮現，
+    而完整管線要好幾分鐘。
+    """
+    import prices
+    for a in cftc.ASSETS:
+        keys = [c["key"] for c in a["contracts"]]
+        check(f"{a['key']} 預設合約在清單內", a["default_contract"] in keys, True)
+        check(f"{a['key']} 分類法都有定義",
+              all(s in cftc.SCHEMES for s in a["schemes"]), True)
+        check(f"{a['key']} 有波動度規格", a["key"] in VOL_SPEC, True)
+        check(f"{a['key']} 要畫的序列都有指定顏色",
+              all(k in VOL_COLORS for k in VOL_PLOT[a["key"]]), True)
+        if a["key"] != "ust":
+            have = {s["key"] for s in prices.SERIES[a["key"]]}
+            check(f"{a['key']} 要畫的價格序列都抓得到",
+                  set(VOL_PLOT[a["key"]]) <= have, True)
+    codes = [c["code"] for a in cftc.ASSETS for c in a["contracts"]]
+    check("合約代碼不重複", len(codes), len(set(codes)))
+
+
 def test_next_release():
     """COT 報週二部位、當週五發布，下一期是再下個週五。"""
     check("週二 → 下下個週五", next_release(date(2026, 8, 18)), date(2026, 8, 28))
@@ -161,6 +244,9 @@ if __name__ == "__main__":
     for fn in [test_num, test_net_excludes_spread, test_net_chg_uses_computed,
                test_chg_mismatch_flags_real_gap, test_percentile,
                test_extremes_need_min_sample, test_realised_vol,
+               test_realised_vol_price, test_realised_vol_price_survives_negative_wti,
+               test_disagg_field_names_keep_cftc_typos, test_disagg_datasets_not_swapped,
+               test_assets_are_self_consistent,
                test_next_release, test_normalise_sorts_by_date,
                test_subtract_gives_options_leg, test_subtract_drops_traders,
                test_subtract_skips_unmatched_dates, test_subtract_preserves_identity]:
