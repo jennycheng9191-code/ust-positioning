@@ -289,40 +289,48 @@ function renderM4() {
        20 日明顯高於 60 日＝波動正在放大。資料涵蓋至 ${spec.date}。</div>`;
 }
 
-/* ── M5 比價（目前只有貴金屬頁的金銀比） ──────────────── */
+/* ── M5 配對（金銀比／WTI-Brent 價差） ────────────────── */
 function renderM5() {
-  const r = A().ratio;
-  // 沒有比價資料的分頁整段藏起來，連標題都不留——留一個空殼標題比沒有還糟。
-  $('m5sec').hidden = !r;
-  if (!r) return;
+  const p = A().pair;
+  // 沒有配對資料的分頁整段藏起來，連標題都不留——留一個空殼標題比沒有還糟。
+  $('m5sec').hidden = !p;
+  if (!p) return;
 
-  const vol = DATA.vol[asset];
-  const overlayKey = r.overlay[current];
-  const price = vol[overlayKey];
+  const price = DATA.vol[asset][p.overlay[current]];
+  const u = p.unit ? ' ' + p.unit : '';
 
-  $('m5title').textContent = r.zh;
-  $('m5note').innerHTML = r.note;
+  $('m5title').textContent = p.zh;
+  $('m5note').innerHTML = p.note;
 
-  // 比值序列兩檔共用，換合約只換右軸疊的那條價格線。
-  const ratioSeries = { name: `${r.zh}（左）`, color: r.color, pts: r.series };
+  // 配對序列同一頁共用，換合約只換右軸疊的那條價格線。
+  const pairSeries = { name: `${p.zh}（左）`, color: p.color, pts: p.series };
   const priceSeries = { name: `${price.zh}（右）`, color: price.color, pts: price.level };
 
+  // 價差有正負號，數字本身就帶方向，區間跨零時尤其要看得出來
+  // （−25.94 – +2.45 一眼就知道跨過零，寫成 −25.94 – 2.45 就不明顯）。
+  // 比值恆為正，加號只會很怪。
+  const n = p.op === 'spread' ? signed : (v => v);
+
   const stats = `
-    <div class="stat">目前 <b>${r.now}</b>
-      <span class="dim">（1 盎司黃金 ≈ ${r.now} 盎司白銀）</span></div>
-    <div class="stat">近三年區間 <b>${r.lo} – ${r.hi}</b></div>
-    <div class="stat">自 ${r.since} 起的百分位 <b>${r.pctile}%</b>
-      <span class="dim">（${num(r.n)} 個交易日）</span></div>`;
+    <div class="stat">目前 <b>${n(p.now)}</b>${u}
+      <span class="dim">（${p.hint}）</span></div>
+    <div class="stat">近三年區間 <b>${n(p.lo)} – ${n(p.hi)}</b>${u}</div>
+    <div class="stat">自 ${p.since} 起的百分位 <b>${p.pctile}%</b>
+      <span class="dim">（${num(p.n)} 個交易日）</span></div>`;
+
+  // 換合約才有意義的那句提示，只有多於一檔的分頁才顯示（原油頁只有 WTI）。
+  const switchHint = A().contracts.length > 1
+    ? `上方切換<b>${A().contracts.map(c => c.zh).join('／')}</b>可換右軸疊的價格。` : '';
 
   $('m5').innerHTML =
     `<div class="statusbar" style="justify-content:flex-start;margin-bottom:10px">${stats}</div>`
-    + dualChart(ratioSeries, priceSeries)
-    + legend([ratioSeries, priceSeries])
+    + dualChart(pairSeries, priceSeries, { zeroLeft: p.zero })
+    + legend([pairSeries, priceSeries])
     + `<div class="note" style="margin:10px 0 0">
        圖為近三年，與 M3 部位軌跡、M4 波動度同一個時間尺度；
-       百分位則用 ${r.since} 起的全樣本算——金銀比是長週期的東西，
+       百分位則用 ${p.since} 起的全樣本算——這類指標都是長週期的，
        只看三年會把極端讀成常態。兩條線各自縮放，看的是方向關係不是高低。
-       上方切換<b>黃金／白銀</b>可換右軸疊的價格。</div>`;
+       ${switchHint}</div>`;
 }
 
 /* ── 頁尾來源 ───────────────────────────────────────── */
@@ -389,7 +397,8 @@ function lineChart(series, opt) {
 /* 比值與價格差兩個數量級（金銀比 ~80、金價 ~4,500），共用一根軸的話
    比值會被壓成一條直線。所以左右各一根軸、各自縮放——代價是**不能讀高低，
    只能讀方向**，這件事在 M5 的說明文字裡有寫明。 */
-function dualChart(left, right) {
+function dualChart(left, right, opt) {
+  opt = opt || {};
   const W = 760, H = 210, PL = 54, PR = 58, PT = 10, PB = 22;
   const t = s => new Date(s + 'T00:00:00').getTime();
   const clean = s => s.pts.filter(p => p[1] !== null && p[1] !== undefined);
@@ -404,16 +413,19 @@ function dualChart(left, right) {
   const L = win(lp), R = win(rp);
   if (!L.length || !R.length) return '';
 
-  const scale = pts => {
+  const scale = (pts, forceZero) => {
     const ys = pts.map(p => p[1]);
     let a = Math.min(...ys), b = Math.max(...ys);
+    // 價差圖一定要看得到零線——正負號就是它的意義所在，
+    // 硬把零軸擠出畫面等於把「現在是折價還是溢價」這件事藏起來。
+    if (forceZero) { a = Math.min(a, 0); b = Math.max(b, 0); }
     const pad = (b - a) * 0.08 || 1;
     a -= pad; b += pad;
     // 比值與價格都是正的，別讓留白把軸推到零以下
-    if (Math.min(...ys) >= 0) a = Math.max(a, 0);
+    if (!forceZero && Math.min(...ys) >= 0) a = Math.max(a, 0);
     return [a, b];
   };
-  const [l0, l1] = scale(L), [r0, r1] = scale(R);
+  const [l0, l1] = scale(L, opt.zeroLeft), [r0, r1] = scale(R);
 
   const px = v => PL + (W - PL - PR) * (v - x0) / (x1 - x0 || 1);
   const py = (v, a, b) => PT + (H - PT - PB) * (1 - (v - a) / (b - a || 1));
@@ -444,7 +456,12 @@ function dualChart(left, right) {
       new Date(v).toISOString().slice(0, 7)}</text>`;
   }).join('');
 
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">${ticks}
+  // 零線只畫左軸的——右軸是價格，價格的零沒有意義。畫在折線底下才不會遮住資料。
+  const zeroLine = (opt.zeroLeft && l0 < 0 && l1 > 0)
+    ? `<line class="zero" x1="${PL}" y1="${py(0, l0, l1).toFixed(1)}"
+        x2="${W - PR}" y2="${py(0, l0, l1).toFixed(1)}"/>` : '';
+
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">${ticks}${zeroLine}
     ${path(R, r0, r1, right.color)}${path(L, l0, l1, left.color)}${xl}</svg>`;
 }
 

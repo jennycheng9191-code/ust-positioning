@@ -125,39 +125,72 @@ def test_realised_vol_price_survives_negative_wti():
     check("算得出有限的數字", all(0 <= p[1] < 1e6 for p in rv["rv1"]), True)
 
 
-def test_ratio_series_inner_joins():
-    """金銀比只能取兩邊都有報價的日期。
+def test_pair_series_inner_joins():
+    """配對序列只能取兩邊都有報價的日期。
 
-    LBMA 的黃金與白銀各有各的休市日：2006 年起白銀多出 40 個黃金沒有的交易日。
-    用前值補會憑空造出「當天比值變動」，而金銀比的用途正是看它怎麼動——
+    各商品的休市日不一樣。2006 年起實測：白銀有 40 天黃金沒報價；
+    WTI 與 Brent 更是兩邊各有缺口（Brent 獨有 87 天、WTI 獨有 46 天）。
+    用前值補會憑空造出「當天的變動」，而這兩張圖的用途正是看它怎麼動——
     補出來的動就是假訊號。
     """
     gold = [["2026-01-01", 4000.0], ["2026-01-02", 4200.0], ["2026-01-03", 4400.0]]
     silver = [["2026-01-01", 50.0], ["2026-01-03", 55.0]]
-    out = derive.ratio_series(gold, silver)
+    out = derive.pair_series(gold, silver, "ratio")
     check("只保留兩邊都有的日期", [d for d, _ in out], ["2026-01-01", "2026-01-03"])
     check("比值算對", out[0][1], 80.0)
 
 
-def test_ratio_series_skips_bad_denominator():
-    """分母為零或負會算出 inf，寧可跳過那一天也不要讓它進圖。"""
+def test_pair_series_ratio_skips_bad_denominator():
+    """比值的分母為零或負會算出 inf，寧可跳過那一天也不要讓它進圖。"""
     gold = [["2026-01-01", 4000.0], ["2026-01-02", 4000.0], ["2026-01-03", 4000.0]]
     silver = [["2026-01-01", 0.0], ["2026-01-02", None], ["2026-01-03", 50.0]]
-    out = derive.ratio_series(gold, silver)
+    out = derive.pair_series(gold, silver, "ratio")
     check("零與空值都跳過", [d for d, _ in out], ["2026-01-03"])
 
 
-def test_ratio_spec_points_at_real_series():
-    """M5 的分子分母與 overlay 都必須指得到實際抓得到的價格序列。
+def test_pair_series_spread_keeps_negative_wti():
+    """價差**不可**沿用比值那套非正值過濾。
+
+    WTI 在 2020-04-20 的 −36.98 是真實成交價，當天的 WTI-Brent 價差 −54.34
+    是那場事件的核心事實，濾掉等於竄改歷史。減法也不會因為負數而爆掉。
+    """
+    wti = [["2020-04-17", 18.27], ["2020-04-20", -36.98], ["2020-04-21", 10.01]]
+    brent = [["2020-04-17", 25.00], ["2020-04-20", 17.36], ["2020-04-21", 16.00]]
+    out = derive.pair_series(wti, brent, "spread")
+    check("負油價那天留下來", [d for d, _ in out],
+          ["2020-04-17", "2020-04-20", "2020-04-21"])
+    check("價差算對（含負值）", out[1][1], -54.34)
+    check("空值仍要跳過",
+          [d for d, _ in derive.pair_series(
+              [["2026-01-01", None], ["2026-01-02", 5.0]],
+              [["2026-01-01", 1.0], ["2026-01-02", 2.0]], "spread")],
+          ["2026-01-02"])
+
+
+def test_pair_series_rejects_unknown_op():
+    """算法名打錯要當場炸掉，不要靜靜回一個空序列讓 M5 整段消失。"""
+    try:
+        derive.pair_series([["2026-01-01", 1.0]], [["2026-01-01", 1.0]], "diff")
+    except ValueError:
+        check("未知算法丟 ValueError", True, True)
+    else:
+        check("未知算法丟 ValueError", False, True)
+
+
+def test_pair_spec_points_at_real_series():
+    """M5 的兩條輸入序列與 overlay 都必須指得到實際抓得到的價格序列。
 
     接錯的話要等抓完資料、build 到最後一步才會 KeyError，而那要好幾分鐘。
     """
     import prices
-    from build import RATIO_SPEC
-    for akey, spec in RATIO_SPEC.items():
+    from build import PAIR_SPEC
+    for akey, spec in PAIR_SPEC.items():
         have = {s["key"] for s in prices.SERIES[akey]}
-        check(f"{akey} 分子有序列", spec["numer"] in have, True)
-        check(f"{akey} 分母有序列", spec["denom"] in have, True)
+        check(f"{akey} 的 a 有序列", spec["a"] in have, True)
+        check(f"{akey} 的 b 有序列", spec["b"] in have, True)
+        check(f"{akey} 算法有效", spec["op"] in ("ratio", "spread"), True)
+        # 價差的正負號有意義，圖上一定要看得到零線；比值恆為正，畫零線只是浪費縱軸
+        check(f"{akey} 價差才畫零線", spec["zero"], spec["op"] == "spread")
         contracts = {c["key"] for c in cftc.ASSET_BY_KEY[akey]["contracts"]}
         check(f"{akey} overlay 涵蓋全部合約", set(spec["overlay"]) == contracts, True)
         check(f"{akey} overlay 都指到實際序列",
@@ -284,8 +317,9 @@ if __name__ == "__main__":
                test_chg_mismatch_flags_real_gap, test_percentile,
                test_extremes_need_min_sample, test_realised_vol,
                test_realised_vol_price, test_realised_vol_price_survives_negative_wti,
-               test_ratio_series_inner_joins, test_ratio_series_skips_bad_denominator,
-               test_ratio_spec_points_at_real_series,
+               test_pair_series_inner_joins, test_pair_series_ratio_skips_bad_denominator,
+               test_pair_series_spread_keeps_negative_wti, test_pair_series_rejects_unknown_op,
+               test_pair_spec_points_at_real_series,
                test_disagg_field_names_keep_cftc_typos, test_disagg_datasets_not_swapped,
                test_assets_are_self_consistent,
                test_next_release, test_normalise_sorts_by_date,

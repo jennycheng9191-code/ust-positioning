@@ -1,4 +1,4 @@
-"""衍生指標：淨部位、週變化交叉驗證、極端度、已實現波動。
+"""衍生指標：淨部位、週變化交叉驗證、極端度、已實現波動、配對序列。
 
 刻意不引入 numpy／pandas——資料量（六檔 × 1054 週）用標準函式庫綽綽有餘，
 少一層相依就少一個在 Actions 上壞掉的理由。
@@ -127,24 +127,40 @@ def realised_vol_price(series: list[list], windows=(20, 60)) -> dict:
     return _roll_annualise(rets, windows)
 
 
-def ratio_series(numer: list[list], denom: list[list], ndigits: int = 2) -> list[list]:
-    """兩條價格序列相除，回傳 [[日期, 比值], ...]。
+def pair_series(a: list[list], b: list[list], op: str = "ratio",
+                ndigits: int = 2) -> list[list]:
+    """兩條價格序列配對成一條，回傳 [[日期, 值], ...]。
 
-    **內連接**：只保留兩邊都有報價的日期。LBMA 的黃金與白銀各有各的休市日——
-    2006 年起白銀多出 40 個黃金沒有的交易日（1968 年起算則差 160 多天）。
-    用前值補會憑空造出「當天比值變動」，而金銀比的用途正是看它怎麼動，
-    補出來的動就是假訊號。
+    op 為 'ratio'（a／b，如金銀比）或 'spread'（a−b，如 WTI-Brent 價差）。
 
-    分母非正一律跳過——理論上貴金屬不會有零或負價，但這條同時擋掉了
-    資料源給空值時算出 inf 的情形，成本只有一行。
+    **一律內連接**：只保留兩邊都有報價的日期。各商品的休市日不一樣，
+    2006 年起實測：白銀有 40 天黃金沒報價（黃金則沒有白銀缺的日子）；
+    WTI 與 Brent 兩邊各有各的缺口——Brent 獨有 87 天、WTI 獨有 46 天，
+    共同日只有 5,135 天。用前值補會憑空造出「當天的變動」，
+    而這兩張圖的用途正是看它怎麼動，補出來的動就是假訊號。
+
+    **兩種算法對非正值的處理刻意不同**：
+
+    - ratio 的分母非正一律跳過。除以零會炸、除以負數在金銀比上沒有意義，
+      這條同時擋掉資料源給怪值時算出 inf 的情形。
+    - spread 不做這個過濾。WTI 在 2020-04-20 的 −36.98 是**真實成交價**，
+      當天的價差 −54.34 是那場事件的核心事實，濾掉等於竄改歷史。
+      減法本來也不會因為負數而爆掉。
     """
-    d = {x[0]: x[1] for x in denom}
+    d = {x[0]: x[1] for x in b}
     out = []
-    for date, n in numer:
-        v = d.get(date)
-        if n is None or v is None or v <= 0:
+    for date, av in a:
+        bv = d.get(date)
+        if av is None or bv is None:
             continue
-        out.append([date, round(n / v, ndigits)])
+        if op == "ratio":
+            if bv <= 0:
+                continue
+            out.append([date, round(av / bv, ndigits)])
+        elif op == "spread":
+            out.append([date, round(av - bv, ndigits)])
+        else:
+            raise ValueError(f"未知的配對算法：{op}")
     return out
 
 

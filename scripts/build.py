@@ -66,22 +66,41 @@ VOL_COLORS = {
 # 美債頁不是四條殖利率全畫，5 年期與 10 年期高度重疊，畫三條就夠讀。
 VOL_PLOT = {"ust": ["y2", "y10", "y30"], "oil": ["wti", "brent"], "metals": ["gold", "silver"]}
 
-# M5 比價模組。目前只有貴金屬頁有——金銀比是這個市場自己的老指標，
-# 沒有等價的東西可以套到美債或原油上（WTI-Brent 是價差不是比值，語義不同，另議）。
+# M5 配對模組：兩條價格序列合成一條，與選定合約的價格疊在雙 Y 軸上。
 #
-# overlay 決定選到哪一檔合約時，右軸要疊哪條價格線：看黃金就疊金價、看白銀就疊銀價。
-# 比值序列本身兩檔共用同一條，換合約只換右軸。
-RATIO_SPEC = {
+# 兩種算法：ratio（a／b，金銀比）與 spread（a−b，WTI-Brent 價差）。
+# 這兩者不能混為一談——比值恆為正、看的是相對強弱的倍數；
+# 價差有正負、零是有意義的分界，所以價差圖一定要畫零線（zero: True）。
+#
+# overlay 決定選到哪一檔合約時，右軸要疊哪條價格線。配對序列本身同一頁共用一條，
+# 換合約只換右軸。原油頁只有 WTI 一檔，所以那張圖固定疊 WTI。
+#
+# hint 的 {v} 會被目前值取代。
+PAIR_SPEC = {
     "metals": {
-        "zh": "金銀比", "en": "Gold/Silver Ratio",
-        "numer": "gold", "denom": "silver",
+        "zh": "金銀比", "en": "Gold/Silver Ratio", "op": "ratio",
+        "a": "gold", "b": "silver", "unit": "", "zero": False,
         "color": "var(--c-lev)",
         "overlay": {"gold": "gold", "silver": "silver"},
+        "hint": "1 盎司黃金 ≈ {v} 盎司白銀",
         "note": "一盎司黃金換得幾盎司白銀。<b>比值走高＝白銀相對弱</b>——"
                 "白銀有一半以上的需求來自工業，景氣轉弱或避險情緒升高時它跌得比黃金兇；"
                 "比值走低則多半出現在再通膨與工業需求回溫的階段。"
                 "左軸為比值、右軸為選定金屬的價格，兩軸各自縮放，"
                 "看的是<b>兩條線的方向關係</b>，不是誰高誰低。",
+    },
+    "oil": {
+        "zh": "WTI-Brent 價差", "en": "WTI minus Brent", "op": "spread",
+        "a": "wti", "b": "brent", "unit": "美元／桶", "zero": True,
+        "color": "var(--c-lev)",
+        "overlay": {"wti": "wti"},
+        "hint": "負值＝WTI 相對 Brent 折價，這是常態",
+        "note": "WTI 現貨減 Brent 現貨，<b>正負號有意義</b>（金銀比那種比值沒有）。"
+                "WTI 是美國內陸 Cushing 交割、Brent 是海運出口指標，"
+                "價差走闊多半反映<b>美國本土供給過剩或外輸瓶頸</b>（管線、出口能力），"
+                "收斂則代表美國原油更容易走向國際市場。"
+                "2006 年以來有 950 個交易日 WTI 是溢價的，所以零線不是裝飾。"
+                "左軸為價差、右軸為 WTI 價格，兩軸各自縮放。",
     },
 }
 
@@ -191,26 +210,31 @@ def build_positions(asset: dict) -> tuple[dict, dict, dict]:
     return history, latest, trail
 
 
-def build_ratio(asset_key: str, raw: dict) -> dict | None:
-    """M5 比價模組的資料。raw 是 build_vol() 抓到的完整價格序列（2006 年起）。
+def build_pair(asset_key: str, raw: dict) -> dict | None:
+    """M5 配對模組的資料。raw 是 build_vol() 抓到的完整價格序列（2006 年起）。
 
     圖只畫近三年（跟 M3 的部位軌跡、M4 的波動度同一個時間尺度，整頁好對照），
-    但**百分位用 2006 年起的全樣本**——金銀比是長週期的東西，
-    2020 年衝到 100 以上、2011 年低到 30 出頭，只看三年會把極端讀成常態。
+    但**百分位用 2006 年起的全樣本**——這兩個指標都是長週期的東西：
+    金銀比 2020 年衝到 123、2011 年低到 31；WTI-Brent 價差最低到 −54（2020-04-20
+    負油價那天）、最高到 +22。只看三年會把極端讀成常態。
+
+    百分位用排序名次算，所以上面那些離群值不會扭曲刻度，留著才是對的。
     """
-    spec = RATIO_SPEC.get(asset_key)
+    spec = PAIR_SPEC.get(asset_key)
     if not spec:
         return None
 
-    full = derive.ratio_series(raw[spec["numer"]], raw[spec["denom"]])
+    full = derive.pair_series(raw[spec["a"]], raw[spec["b"]], spec["op"])
     if not full:
         raise RuntimeError(f"{asset_key} 的{spec['zh']}算不出任何一天——兩條價格序列沒有共同日期")
 
     vals = [v for _, v in full]
     now = vals[-1]
-    window = [v for d, v in full[-VOL_DAYS:]]
+    window = [v for _, v in full[-VOL_DAYS:]]
     return {
         "zh": spec["zh"], "en": spec["en"], "note": spec["note"],
+        "op": spec["op"], "unit": spec["unit"], "zero": spec["zero"],
+        "hint": spec["hint"].replace("{v}", str(now)),
         "color": spec["color"], "overlay": spec["overlay"],
         "series": full[-VOL_DAYS:],
         "now": now,
@@ -222,7 +246,7 @@ def build_ratio(asset_key: str, raw: dict) -> dict | None:
 
 
 def build_vol(asset_key: str) -> tuple[dict, str, dict]:
-    """某一資產分頁的波動度序列，回傳（序列表, 資料涵蓋到哪一天, 比價模組或 None）。"""
+    """某一資產分頁的波動度序列，回傳（序列表, 資料涵蓋到哪一天, 配對模組或 None）。"""
     vol = {}
     if asset_key == "ust":
         raw = fred.fetch_all()
@@ -244,15 +268,16 @@ def build_vol(asset_key: str) -> tuple[dict, str, dict]:
         print("    %-6s 已實現波動 20d=%s %s"
               % (s["key"], rv["rv20"][-1][1], VOL_SPEC[asset_key]["unit"]))
 
-    ratio = build_ratio(asset_key, raw)
-    if ratio:
-        print("    %-6s %s（%s 起 %d 天樣本，百分位 %s）"
-              % (ratio["zh"], ratio["now"], ratio["since"], ratio["n"], ratio["pctile"]))
-    return vol, max(v[-1][0] for v in raw.values()), ratio
+    pair = build_pair(asset_key, raw)
+    if pair:
+        print("    %-14s %s%s（%s 起 %d 天樣本，百分位 %s）"
+              % (pair["zh"], pair["now"], pair["unit"],
+                 pair["since"], pair["n"], pair["pctile"]))
+    return vol, max(v[-1][0] for v in raw.values()), pair
 
 
 def build() -> dict:
-    latest, trail, vols, price_dates, ratios = {}, {}, {}, {}, {}
+    latest, trail, vols, price_dates, pairs = {}, {}, {}, {}, {}
 
     for asset in cftc.ASSETS:
         print("【%s】" % asset["zh"])
@@ -262,7 +287,7 @@ def build() -> dict:
 
         print("  抓取價格／殖利率…")
         (vols[asset["key"]], price_dates[asset["key"]],
-         ratios[asset["key"]]) = build_vol(asset["key"])
+         pairs[asset["key"]]) = build_vol(asset["key"])
 
     # 各分頁的報告日理論上相同（同一份 COT），但仍逐一記錄：
     # CFTC 曾對個別合約補發修正，屆時分頁之間會短暫不同步，記下來才看得出來。
@@ -294,10 +319,10 @@ def build() -> dict:
             },
             "source_note": SOURCE_NOTES[a["key"]],
         })
-        # 只有定義了 RATIO_SPEC 的分頁才帶這個鍵，前端據此決定要不要顯示 M5，
-        # 不必知道哪一頁是貴金屬。
-        if ratios[a["key"]]:
-            assets_meta[-1]["ratio"] = ratios[a["key"]]
+        # 只有定義了 PAIR_SPEC 的分頁才帶這個鍵，前端據此決定要不要顯示 M5，
+        # 不必知道哪一頁是貴金屬、哪一頁是原油。
+        if pairs[a["key"]]:
+            assets_meta[-1]["pair"] = pairs[a["key"]]
 
     payload = {
         "meta": {
