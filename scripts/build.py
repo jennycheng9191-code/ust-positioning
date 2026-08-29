@@ -66,6 +66,25 @@ VOL_COLORS = {
 # 美債頁不是四條殖利率全畫，5 年期與 10 年期高度重疊，畫三條就夠讀。
 VOL_PLOT = {"ust": ["y2", "y10", "y30"], "oil": ["wti", "brent"], "metals": ["gold", "silver"]}
 
+# M5 比價模組。目前只有貴金屬頁有——金銀比是這個市場自己的老指標，
+# 沒有等價的東西可以套到美債或原油上（WTI-Brent 是價差不是比值，語義不同，另議）。
+#
+# overlay 決定選到哪一檔合約時，右軸要疊哪條價格線：看黃金就疊金價、看白銀就疊銀價。
+# 比值序列本身兩檔共用同一條，換合約只換右軸。
+RATIO_SPEC = {
+    "metals": {
+        "zh": "金銀比", "en": "Gold/Silver Ratio",
+        "numer": "gold", "denom": "silver",
+        "color": "var(--c-lev)",
+        "overlay": {"gold": "gold", "silver": "silver"},
+        "note": "一盎司黃金換得幾盎司白銀。<b>比值走高＝白銀相對弱</b>——"
+                "白銀有一半以上的需求來自工業，景氣轉弱或避險情緒升高時它跌得比黃金兇；"
+                "比值走低則多半出現在再通膨與工業需求回溫的階段。"
+                "左軸為比值、右軸為選定金屬的價格，兩軸各自縮放，"
+                "看的是<b>兩條線的方向關係</b>，不是誰高誰低。",
+    },
+}
+
 
 # 頁尾的資料來源說明。跟著分頁走，因為三頁的來源與授權狀況並不相同。
 SOURCE_NOTES = {
@@ -172,8 +191,38 @@ def build_positions(asset: dict) -> tuple[dict, dict, dict]:
     return history, latest, trail
 
 
-def build_vol(asset_key: str) -> tuple[dict, str]:
-    """某一資產分頁的波動度序列，回傳（序列表, 資料涵蓋到哪一天）。"""
+def build_ratio(asset_key: str, raw: dict) -> dict | None:
+    """M5 比價模組的資料。raw 是 build_vol() 抓到的完整價格序列（2006 年起）。
+
+    圖只畫近三年（跟 M3 的部位軌跡、M4 的波動度同一個時間尺度，整頁好對照），
+    但**百分位用 2006 年起的全樣本**——金銀比是長週期的東西，
+    2020 年衝到 100 以上、2011 年低到 30 出頭，只看三年會把極端讀成常態。
+    """
+    spec = RATIO_SPEC.get(asset_key)
+    if not spec:
+        return None
+
+    full = derive.ratio_series(raw[spec["numer"]], raw[spec["denom"]])
+    if not full:
+        raise RuntimeError(f"{asset_key} 的{spec['zh']}算不出任何一天——兩條價格序列沒有共同日期")
+
+    vals = [v for _, v in full]
+    now = vals[-1]
+    window = [v for d, v in full[-VOL_DAYS:]]
+    return {
+        "zh": spec["zh"], "en": spec["en"], "note": spec["note"],
+        "color": spec["color"], "overlay": spec["overlay"],
+        "series": full[-VOL_DAYS:],
+        "now": now,
+        "lo": min(window), "hi": max(window),
+        "pctile": round(derive._percentile_rank(vals, now), 1),
+        "since": full[0][0],
+        "n": len(full),
+    }
+
+
+def build_vol(asset_key: str) -> tuple[dict, str, dict]:
+    """某一資產分頁的波動度序列，回傳（序列表, 資料涵蓋到哪一天, 比價模組或 None）。"""
     vol = {}
     if asset_key == "ust":
         raw = fred.fetch_all()
@@ -194,11 +243,16 @@ def build_vol(asset_key: str) -> tuple[dict, str]:
         vol[s["key"]]["color"] = VOL_COLORS.get(s["key"], "var(--c-nonrept)")
         print("    %-6s 已實現波動 20d=%s %s"
               % (s["key"], rv["rv20"][-1][1], VOL_SPEC[asset_key]["unit"]))
-    return vol, max(v[-1][0] for v in raw.values())
+
+    ratio = build_ratio(asset_key, raw)
+    if ratio:
+        print("    %-6s %s（%s 起 %d 天樣本，百分位 %s）"
+              % (ratio["zh"], ratio["now"], ratio["since"], ratio["n"], ratio["pctile"]))
+    return vol, max(v[-1][0] for v in raw.values()), ratio
 
 
 def build() -> dict:
-    latest, trail, vols, price_dates = {}, {}, {}, {}
+    latest, trail, vols, price_dates, ratios = {}, {}, {}, {}, {}
 
     for asset in cftc.ASSETS:
         print("【%s】" % asset["zh"])
@@ -207,7 +261,8 @@ def build() -> dict:
         print("  歷史檔 cot_history_%s.csv %s 列" % (asset["key"], f"{n:,}"))
 
         print("  抓取價格／殖利率…")
-        vols[asset["key"]], price_dates[asset["key"]] = build_vol(asset["key"])
+        (vols[asset["key"]], price_dates[asset["key"]],
+         ratios[asset["key"]]) = build_vol(asset["key"])
 
     # 各分頁的報告日理論上相同（同一份 COT），但仍逐一記錄：
     # CFTC 曾對個別合約補發修正，屆時分頁之間會短暫不同步，記下來才看得出來。
@@ -239,6 +294,10 @@ def build() -> dict:
             },
             "source_note": SOURCE_NOTES[a["key"]],
         })
+        # 只有定義了 RATIO_SPEC 的分頁才帶這個鍵，前端據此決定要不要顯示 M5，
+        # 不必知道哪一頁是貴金屬。
+        if ratios[a["key"]]:
+            assets_meta[-1]["ratio"] = ratios[a["key"]]
 
     payload = {
         "meta": {

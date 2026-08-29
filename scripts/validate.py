@@ -137,6 +137,25 @@ def check_vol(payload: dict) -> None:
         print(f"✓ {a['zh']}：波動度 {len(a['vol']['plot'])} 條序列，涵蓋至 {a['vol']['date']}"
               f"（{age} 天前）")
 
+        # M5 比價模組（有定義的分頁才有）。比值是相除出來的，
+        # 分母若給了零或空值會算出 inf／nan，這裡是最後一道網。
+        r = a.get("ratio")
+        if not r:
+            continue
+        if not r.get("series"):
+            fail(f"{a['key']} 的{r['zh']}沒有序列")
+        if not (0 < r["now"] < 1e6) or not (0 < r["lo"] <= r["hi"] < 1e6):
+            fail(f"{a['key']} 的{r['zh']}數值不合理："
+                 f"now={r['now']} lo={r['lo']} hi={r['hi']}")
+        if not (r["lo"] <= r["now"] <= r["hi"]):
+            fail(f"{a['key']} 的{r['zh']}最新值 {r['now']} 落在近三年區間"
+                 f" {r['lo']}–{r['hi']} 之外")
+        missing_overlay = set(r["overlay"].values()) - set(vol)
+        if missing_overlay:
+            fail(f"{a['key']} 的{r['zh']} overlay 指到不存在的價格序列：{sorted(missing_overlay)}")
+        print(f"✓ {a['zh']}：{r['zh']} {r['now']}，近三年 {r['lo']}–{r['hi']}，"
+              f"{r['since']} 起百分位 {r['pctile']}%")
+
 
 def check_history_files() -> None:
     # 各分頁的歷史檔列數下限。取 2026-08-25 實際列數（ust 159,111／oil 31,353／

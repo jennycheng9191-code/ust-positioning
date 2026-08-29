@@ -289,6 +289,42 @@ function renderM4() {
        20 日明顯高於 60 日＝波動正在放大。資料涵蓋至 ${spec.date}。</div>`;
 }
 
+/* ── M5 比價（目前只有貴金屬頁的金銀比） ──────────────── */
+function renderM5() {
+  const r = A().ratio;
+  // 沒有比價資料的分頁整段藏起來，連標題都不留——留一個空殼標題比沒有還糟。
+  $('m5sec').hidden = !r;
+  if (!r) return;
+
+  const vol = DATA.vol[asset];
+  const overlayKey = r.overlay[current];
+  const price = vol[overlayKey];
+
+  $('m5title').textContent = r.zh;
+  $('m5note').innerHTML = r.note;
+
+  // 比值序列兩檔共用，換合約只換右軸疊的那條價格線。
+  const ratioSeries = { name: `${r.zh}（左）`, color: r.color, pts: r.series };
+  const priceSeries = { name: `${price.zh}（右）`, color: price.color, pts: price.level };
+
+  const stats = `
+    <div class="stat">目前 <b>${r.now}</b>
+      <span class="dim">（1 盎司黃金 ≈ ${r.now} 盎司白銀）</span></div>
+    <div class="stat">近三年區間 <b>${r.lo} – ${r.hi}</b></div>
+    <div class="stat">自 ${r.since} 起的百分位 <b>${r.pctile}%</b>
+      <span class="dim">（${num(r.n)} 個交易日）</span></div>`;
+
+  $('m5').innerHTML =
+    `<div class="statusbar" style="justify-content:flex-start;margin-bottom:10px">${stats}</div>`
+    + dualChart(ratioSeries, priceSeries)
+    + legend([ratioSeries, priceSeries])
+    + `<div class="note" style="margin:10px 0 0">
+       圖為近三年，與 M3 部位軌跡、M4 波動度同一個時間尺度；
+       百分位則用 ${r.since} 起的全樣本算——金銀比是長週期的東西，
+       只看三年會把極端讀成常態。兩條線各自縮放，看的是方向關係不是高低。
+       上方切換<b>黃金／白銀</b>可換右軸疊的價格。</div>`;
+}
+
 /* ── 頁尾來源 ───────────────────────────────────────── */
 function renderFooter() {
   const m = DATA.meta;
@@ -349,6 +385,69 @@ function lineChart(series, opt) {
     ${ticks}${zeroLine}${paths}${xl}</svg>`;
 }
 
+/* ── 雙 Y 軸折線圖 ──────────────────────────────────── */
+/* 比值與價格差兩個數量級（金銀比 ~80、金價 ~4,500），共用一根軸的話
+   比值會被壓成一條直線。所以左右各一根軸、各自縮放——代價是**不能讀高低，
+   只能讀方向**，這件事在 M5 的說明文字裡有寫明。 */
+function dualChart(left, right) {
+  const W = 760, H = 210, PL = 54, PR = 58, PT = 10, PB = 22;
+  const t = s => new Date(s + 'T00:00:00').getTime();
+  const clean = s => s.pts.filter(p => p[1] !== null && p[1] !== undefined);
+  const lp = clean(left), rp = clean(right);
+  if (!lp.length || !rp.length) return '';
+
+  // 兩條線的起訖裁到共同區間，否則其中一條會多出一截沒有對照的尾巴，
+  // 讀起來像是那段期間另一個數列缺值。
+  const x0 = Math.max(t(lp[0][0]), t(rp[0][0]));
+  const x1 = Math.min(t(lp[lp.length - 1][0]), t(rp[rp.length - 1][0]));
+  const win = pts => pts.filter(p => t(p[0]) >= x0 && t(p[0]) <= x1);
+  const L = win(lp), R = win(rp);
+  if (!L.length || !R.length) return '';
+
+  const scale = pts => {
+    const ys = pts.map(p => p[1]);
+    let a = Math.min(...ys), b = Math.max(...ys);
+    const pad = (b - a) * 0.08 || 1;
+    a -= pad; b += pad;
+    // 比值與價格都是正的，別讓留白把軸推到零以下
+    if (Math.min(...ys) >= 0) a = Math.max(a, 0);
+    return [a, b];
+  };
+  const [l0, l1] = scale(L), [r0, r1] = scale(R);
+
+  const px = v => PL + (W - PL - PR) * (v - x0) / (x1 - x0 || 1);
+  const py = (v, a, b) => PT + (H - PT - PB) * (1 - (v - a) / (b - a || 1));
+  // 4,562 不需要小數，70.26 需要——依數量級決定位數
+  const fmt = v => Math.abs(v) >= 200 ? Math.round(v).toLocaleString('en-US') : v.toFixed(1);
+
+  const path = (pts, a, b, color) =>
+    `<path d="${pts.map((p, i) => (i ? 'L' : 'M') + px(t(p[0])).toFixed(1)
+      + ' ' + py(p[1], a, b).toFixed(1)).join(' ')}"
+      fill="none" stroke="${color}" stroke-width="1.6"
+      stroke-linejoin="round" stroke-linecap="round"/>`;
+
+  // 四格刻度共用同一批格線，左右各標自己的數字
+  const ticks = [0, 1, 2, 3].map(i => {
+    const f = i / 3;
+    const y = (PT + (H - PT - PB) * (1 - f)).toFixed(1);
+    return `<line class="axis" x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" opacity=".45"/>
+      <text x="${PL - 6}" y="${(+y + 3.5).toFixed(1)}" text-anchor="end"
+        fill="${left.color}">${fmt(l0 + (l1 - l0) * f)}</text>
+      <text x="${W - PR + 6}" y="${(+y + 3.5).toFixed(1)}" text-anchor="start"
+        fill="${right.color}">${fmt(r0 + (r1 - r0) * f)}</text>`;
+  }).join('');
+
+  const xl = [0, 0.5, 1].map(f => {
+    const v = x0 + (x1 - x0) * f;
+    const anchor = f === 0 ? 'start' : (f === 1 ? 'end' : 'middle');
+    return `<text x="${px(v).toFixed(1)}" y="${H - 6}" text-anchor="${anchor}">${
+      new Date(v).toISOString().slice(0, 7)}</text>`;
+  }).join('');
+
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">${ticks}
+    ${path(R, r0, r1, right.color)}${path(L, l0, l1, left.color)}${xl}</svg>`;
+}
+
 function legend(series) {
   return `<div class="legend">${series.map(s =>
     `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>`;
@@ -357,7 +456,7 @@ function legend(series) {
 /* ── 進入點 ─────────────────────────────────────────── */
 function render() {
   renderAssets(); renderChips(); renderSchemes(); renderBases();
-  renderM1(); renderM2(); renderM3(); renderM4(); renderFooter();
+  renderM1(); renderM2(); renderM3(); renderM4(); renderM5(); renderFooter();
 }
 
 fetch('data/latest.json')

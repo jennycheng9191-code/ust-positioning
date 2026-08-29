@@ -127,6 +127,27 @@ def realised_vol_price(series: list[list], windows=(20, 60)) -> dict:
     return _roll_annualise(rets, windows)
 
 
+def ratio_series(numer: list[list], denom: list[list], ndigits: int = 2) -> list[list]:
+    """兩條價格序列相除，回傳 [[日期, 比值], ...]。
+
+    **內連接**：只保留兩邊都有報價的日期。LBMA 的黃金與白銀各有各的休市日——
+    2006 年起白銀多出 40 個黃金沒有的交易日（1968 年起算則差 160 多天）。
+    用前值補會憑空造出「當天比值變動」，而金銀比的用途正是看它怎麼動，
+    補出來的動就是假訊號。
+
+    分母非正一律跳過——理論上貴金屬不會有零或負價，但這條同時擋掉了
+    資料源給空值時算出 inf 的情形，成本只有一行。
+    """
+    d = {x[0]: x[1] for x in denom}
+    out = []
+    for date, n in numer:
+        v = d.get(date)
+        if n is None or v is None or v <= 0:
+            continue
+        out.append([date, round(n / v, ndigits)])
+    return out
+
+
 def _roll_annualise(diffs: list[list], windows) -> dict:
     """對 [[日期, 日變動], ...] 做滾動母體標準差並年化。兩個波動度函式共用。"""
     out = {f"rv{w}": [] for w in windows}
