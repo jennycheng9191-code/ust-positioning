@@ -1,0 +1,22 @@
+# 換行一律以 LF 存進 git，也以 LF 簽出——不管誰在什麼平台上跑。
+#
+# 為什麼需要這個檔：data/ 底下的歷史 CSV 由 build.py 產生，而
+# Python 的 csv.writer 預設用 "\r\n" 結尾（連 Linux 也是）。本機 git 開了
+# core.autocrlf=true 會在 commit 時正規化成 LF，Actions 的 runner 沒開就照
+# CRLF 存。兩邊存進 git 的 blob 因此不同，只要本機建置一次再讓排程跑一次，
+# 三個歷史檔（合計 22 MB）就整份改寫一遍——2026-08-29 實測一次 commit
+# 就是 253,383 行全刪全增，內容卻一個字都沒變。
+#
+# build.py 那邊已把 lineterminator 寫死成 "\n"，這個檔是第二道保險：
+# 就算日後有人改回預設、或換了個 autocrlf 設定不同的機器，git 層仍會拉齊。
+* text=auto eol=lf
+
+# 明確列出實際會進版控的類型，讀的人不用去猜 text=auto 判成什麼
+*.csv  text eol=lf
+*.json text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf

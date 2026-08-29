@@ -217,6 +217,19 @@ docs/verification.md      對帳紀錄
 歷史檔按分頁分開（原本是單一 `cot_history.csv`）：商品的 Legacy 僅期貨版回溯到 1986 年，
 合起來一個檔會逼近 30 MB，每週改寫一次對 git 不友善。拆開之後改一頁只動一個檔。
 
+### CSV 的換行一定要是 LF
+
+`build.py` 的 `csv.writer` 有寫死 `lineterminator="\n"`，`.gitattributes` 也標了
+`*.csv text eol=lf`。**兩道都不能拿掉。**
+
+Python 的 `csv.writer` 預設用 `\r\n` 結尾——**連 Linux 也是**。而本機 git 開了
+`core.autocrlf=true`，commit 時會把 CRLF 正規化成 LF；Actions 的 runner 沒開這個設定，
+就照 CRLF 存。兩邊存進 git 的 blob 因此不同，只要本機建置一次再讓排程跑一次，
+這三個檔（合計 22 MB）就整份改寫一遍。
+
+2026-08-29 實測過一次：Actions 的一個 `資料更新` commit 是 **253,383 行全刪全增**，
+而內容一個字都沒變。每週來一次，一年就把倉庫撐掉好幾 GB。
+
 各檔為長格式，一列一個「報告日 × 分類法 × 口徑 × 合約 × 交易人類別」。
 要單獨看選擇權篩 `basis=options`；要對照新聞的「投機客淨部位」篩
 `scheme=legacy & category=noncomm`。

@@ -152,7 +152,13 @@ def write_history_csv(asset_key: str, history: dict) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
+        # lineterminator 必須寫死 "\n"。csv.writer 預設是 "\r\n"，**連 Linux 也是**，
+        # 而本機 git 的 core.autocrlf=true 會在 commit 時把 CRLF 正規化成 LF、
+        # Actions 的 runner 沒開這個設定就照 CRLF 存。兩邊存進 git 的 blob 因此不同，
+        # 只要本機建置一次再讓排程跑一次，這三個檔（合計 22 MB）就整份改寫一遍——
+        # 2026-08-29 實測一次 commit 就是 253,383 行全刪全增，內容卻一個字都沒變。
+        # 搭配 .gitattributes 的 `*.csv text eol=lf`，兩邊才會永遠一致。
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(HIST_COLS)
         for skey, by_basis in history.items():
             for bkey, by_contract in by_basis.items():
