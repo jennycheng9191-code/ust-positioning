@@ -204,7 +204,8 @@ scripts/
   derive.py    淨部位、週變化、極端度、已實現波動（殖利率版與價格版）、配對序列（比值／價差）
   build.py     主流程，產出 data/
   validate.py  產出檢查（過期門檻、恆等式、零和、選擇權範圍、波動度與配對合理性、列數）
-  reconcile.py 對 CFTC 六份原始報告的外部對帳（三分類法 × 兩口徑）
+  reconcile.py 對 CFTC 六份「當期」原始報告的外部對帳（三分類法 × 兩口徑）
+  reconcile_history.py  對 CFTC 年度壓縮檔的**跨期**對帳（全歷史逐列，約 60 萬個數字）
   test_transform.py  回歸測試（不連網）
 data/
   latest.json             網頁吃的那份（三個分頁合併成一份，約 2.4 MB）
@@ -233,6 +234,21 @@ Python 的 `csv.writer` 預設用 `\r\n` 結尾——**連 Linux 也是**。而�
 各檔為長格式，一列一個「報告日 × 分類法 × 口徑 × 合約 × 交易人類別」。
 要單獨看選擇權篩 `basis=options`；要對照新聞的「投機客淨部位」篩
 `scheme=legacy & category=noncomm`。
+
+### 改 `cftc.py` 的欄位對應之前先讀這段
+
+CFTC 的 Socrata 資料集裡有好幾組「長得都像對的」欄位名，選錯**不會報錯**：
+
+- `swap__positions_short_all`／`swap__positions_spread_all` 是**雙底線**，
+  多方欄只有一個。改成單底線會抓到一整排 `None`。
+- `noncomm_postions_spread_all`（`postions` 少一個 i）才是 Legacy 非商業價差的
+  「All」值；拼字正確的 `noncomm_positions_spread` 裝的是 **Old 作物年度**。
+  兩者 2000 年以後幾乎完全相同，接錯的話近 26 年全對、只有 1986–1999 偏掉。
+  這個錯本站真的犯過，2026-08-30 靠跨期對帳才抓到。
+
+**規則：照抄 CFTC 的拼字錯誤，不要挑看起來正確的名字。** 而且
+`validate.py` 的恆等式**只跑最新一期**，歷史不在它的守備範圍——
+改完欄位對應要跑 `python scripts/reconcile_history.py` 才算驗過。
 
 ## 本機執行
 

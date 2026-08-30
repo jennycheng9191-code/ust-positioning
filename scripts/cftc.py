@@ -141,8 +141,17 @@ LEGACY_CATEGORIES = [
     {
         "key": "noncomm", "zh": "非商業（投機）", "en": "Non-Commercial",
         "long": "noncomm_positions_long_all", "short": "noncomm_positions_short_all",
-        "spread": "noncomm_positions_spread",
-        # CFTC 這個欄位名少了一個 r（spead），是他們資料集本身的既有拼字錯誤，只能照抄
+        # ⚠ 這一欄有兩個長得都像對的名字，選錯不會報錯、只會在 2000 年以前給出別的數字：
+        #     noncomm_postions_spread_all  ← 正確的「All」值（postions 少一個 i，CFTC 的拼字錯誤）
+        #     noncomm_positions_spread     ← 拼字是對的，但它裝的是 **Old 作物年度** 的值
+        #   兩者在 2000 年以後幾乎完全相同（多數期別分毫不差），所以接錯的話近 26 年
+        #   全部正確，只有 1986–1999 會偏掉，而且偏得很大（1987-09-15 長債：
+        #   正確 14,390，錯的欄位 6,294）。恆等式驗不出來——validate.py 只驗最新一期。
+        #   2026-08-30 的跨期對帳（reconcile_history.py）就是這樣抓出來的。
+        #   規則同 swap 的雙底線：**照抄 CFTC 的拼字錯誤，不要挑看起來正確的名字**。
+        #   （同一個資料集裡還有 change_in_noncomm_spead_all、traders_noncomm_spead_old
+        #     這種少一個 r 的欄位，本站沒用到，但要改動時記得也是照抄不修。）
+        "spread": "noncomm_postions_spread_all",
         "chg_long": "change_in_noncomm_long_all", "chg_short": "change_in_noncomm_short_all",
         "traders_long": "traders_noncomm_long_all", "traders_short": "traders_noncomm_short_all",
     },

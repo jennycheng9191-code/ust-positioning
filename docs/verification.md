@@ -5,12 +5,17 @@
 
 ## 驗證方法
 
-Socrata API（`publicreporting.cftc.gov`）與純文字報告（`cftc.gov/dea/newcot/`）
-是 CFTC 的**兩條不同發布管道**。本站抓的是前者，對帳用的是後者。
-這樣才驗得出「欄位對應接錯」這一類錯誤——例如把 `asset_mgr_spread` 誤當
+本站抓的是 Socrata API（`publicreporting.cftc.gov`），對帳用的是 CFTC 的**另外兩條
+發布管道**。這樣才驗得出「欄位對應接錯」這一類錯誤——例如把 `asset_mgr_spread` 誤當
 `asset_mgr_short` 使用，API 內部永遠自洽，只有跟原始報告逐欄比對才會現形。
 
-四份官方原始報告：
+| 對帳 | 程式 | 來源 | 涵蓋 |
+|:--|:--|:--|:--|
+| 當期 | `reconcile.py` | `cftc.gov/dea/newcot/` 純文字週報 | 最新一期 |
+| 跨期 | `reconcile_history.py` | `cftc.gov/files/dea/history/` 年度壓縮檔 | 全歷史（1986 起） |
+
+週報只含當期、換週就被覆蓋，所以驗不到歷史；年度壓縮檔才看得出 API 有沒有悄悄
+修訂舊值，或本站的欄位在某個年代以前接錯（2026-08-30 真的抓到一個，見下）。
 
 六份官方原始報告（含 2026-08-29 加入原油與貴金屬分頁後的 Disagg 兩份）：
 
@@ -34,8 +39,11 @@ Socrata API（`publicreporting.cftc.gov`）與純文字報告（`cftc.gov/dea/ne
 重跑方式：
 
 ```bash
-python scripts/reconcile.py                            # 四份全對
+python scripts/reconcile.py                            # 當期：六份全對
 python scripts/reconcile.py legacy combined deacom.txt # 指定一份，用本機檔
+
+python scripts/reconcile_history.py                    # 跨期：全歷史逐列
+python scripts/reconcile_history.py tff combined       # 只對其中一組
 ```
 
 `cftc.gov` 主站有 Akamai 機器人偵測，一般 HTTP 客戶端與 `curl_cffi` 都會拿到 403
@@ -184,7 +192,86 @@ python scripts/reconcile.py legacy combined deacom.txt # 指定一份，用本�
 正好踩中那條規則，而價差 +54.34 是那場事件的核心事實，濾掉等於竄改歷史。
 `test_pair_series_spread_keeps_negative_wti` 釘住這一點。
 
+### 2026-08-30 — 跨期對帳：全歷史逐列，抓出 Legacy 價差欄接錯
+
+`scripts/reconcile_history.py`，來源是 CFTC 的**年度壓縮檔**
+（`cftc.gov/files/dea/history/`），與週報 `/dea/newcot/` 是不同的檔案。
+比對本站 `data/cot_history_*.csv` 的每一列：`long`／`short`／`spread`／`oi` 四個數字。
+
+| 分類法 | 口徑 | 涵蓋期間 | 比對數字 | 修正前不符 | 修正後 |
+|:--|:--|:--|--:|--:|--:|
+| TFF | 合併版 | 2006-06 → 2026-08 | 106,894 | 0 | **0** |
+| TFF | 僅期貨 | 2006-06 → 2026-08 | 106,894 | 0 | **0** |
+| Disagg | 合併版 | 2006-06 → 2026-08 | 56,970 | 0 | **0** |
+| Disagg | 僅期貨 | 2006-06 → 2026-08 | 56,970 | 0 | **0** |
+| Legacy | 合併版 | 1995-03 → 2026-08 | 128,720 | 2 | **0** |
+| Legacy | 僅期貨 | 1986-01 → 2026-08 | 147,610 | 2,171 | **0** |
+| | | **合計** | **604,058** | **2,173** | **0** |
+
+週數兩個方向都對過：本站沒有多出官方沒有的報告日，官方也沒有本站缺的報告日。
+
+#### 抓到的錯：Legacy 非商業價差取到了 Old 作物年度
+
+Socrata 的 Legacy 資料集有兩個長得都像對的欄位：
+
+| 欄位 | 內容 |
+|:--|:--|
+| `noncomm_postions_spread_all` | **要的「All」值**（`postions` 少一個 i，CFTC 拼字錯誤） |
+| `noncomm_positions_spread` | 拼字正確，但裝的是 **Old 作物年度**的值 |
+
+本站原本接的是拼字正確的那個。**2000 年以後兩者幾乎完全相同**（多數期別分毫不差），
+所以近 26 年的資料全部正確，只有 1986–1999 偏掉，而且偏得很大：
+
+| 報告日 | 合約 | 正確（官方年度檔） | 錯的欄位 |
+|:--|:--|--:|--:|
+| 1987-09-15 | 長債 | 14,390 | 6,294 |
+| 1993-06-15 | 長債 | 10,181 | 5,508 |
+| 1999-01-05 | 黃金 | 20,578 | 9,716 |
+| 2000-01-04 | 黃金 | 18,440 | 18,438 |
+| 2010-06-15 起 | 全部 | — | 完全一致 |
+
+**影響範圍**：只有 `spread` 這一欄，只有 Legacy，只有 1986–2000。重建後 CSV 有
+3,162 列變動（僅期貨 2,171、合併版 2、選擇權 989——選擇權是相減出來的，跟著錯），
+`latest.json` 位元組完全沒變。淨部位不受影響（`net = long − short`，本來就不含價差），
+所以 M1–M4 的淨部位、週變化、極端度都不受波及；受影響的是 2000 年以前的價差部位數值本身。
+
+#### 為什麼既有的檢查都沒抓到
+
+| 檢查 | 為什麼沒擋住 |
+|:--|:--|
+| `validate.py` 的恆等式與零和 | **只跑最新一期**（`check_positions` 讀的是 `payload["latest"]`）。歷史從來沒有被恆等式驗過 |
+| `reconcile.py` 外部對帳 | 只對得到當期，而當期本來就是對的 |
+| `test_transform.py` 的欄位名測試 | 它把**本站自己的選擇**釘成「應為 X」——測試一直是綠的，因為它驗的是「有沒有被改動」，不是「一開始選得對不對」 |
+
+最後一條是 `feedback_checksum_must_be_external` 的又一個實例，而且比 swap 那次更難察覺：
+swap 接錯會抓到一整排 `None`，這次接錯抓到的是**另一個真實存在、數量級相近的數字**。
+
+已由 `test_legacy_noncomm_spread_uses_all_not_old` 釘死（新增測試時記得加進
+`test_transform.py` 底部的執行清單——那份清單是手寫的，漏加不會報錯，只會靜靜不跑）。
+
+#### 年度壓縮檔的三個坑
+
+1. **擋法與週報相反**。`cftc.gov/dea/newcot/` 一般 `requests` 403、要瀏覽器另存；
+   `cftc.gov/files/dea/history/` 一般 `requests` 200，而 `curl_cffi` 偽裝 Chrome
+   反而 403。同一個網域兩條路徑相反，照抄 `reconcile.py` 的做法會抓不到。
+2. **欄位名稱會騙人**。多年份合輯的欄位也叫 `Report_Date_as_YYYY-MM-DD`，
+   但值是 `12/27/2016 12:00:00 AM`；只有 2017 起的年度檔才真的是 `2016-12-27`。
+   這不會讓程式報錯，只會讓 2006–2016 那十一年一列都對不上、然後印出「0 個不符」
+   ——因為對不上的列根本沒進到比對迴圈。**所以逐列對帳一定要同時回報「對不上的週數」，
+   只數不符的個數會把整段漏掉的歷史讀成通過。**
+3. **檔名猜不出來，要去官方索引頁撈**。TFF／Disagg 的年度檔只回溯到 2010，
+   2006–2009 只在多年份合輯裡；合輯與年度檔的字序還相反
+   （`fin_com_txt_2006_2016.zip` vs `com_fin_txt_2024.zip`）；
+   Legacy 合併版 1995–2003 是 `deahistfo_1995.zip`（有底線）、2004 起沒底線。
+   猜了 12 個名字全 404，最後是從
+   `MarketReports/CommitmentsofTraders/HistoricalCompressed/index.htm` 撈連結才拿到。
+
+用合輯（涵蓋到 2016）＋ 2017 起的年度檔，66 個檔蓋滿全歷史，比逐年抓 157 個少一半，
+下載量約 150 MB，快取在系統暫存區、不進版控。
+
 ## 待辦
 
-- 目前只對過最新一期。`/dea/newcot/` 底下的檔案都僅含當期，歷史期別要另從 CFTC 的
-  年度壓縮檔取得。等累積幾期後補一次跨期比對，確認歷史序列沒有被 API 悄悄修訂。
+- **`validate.py` 的恆等式與零和只跑最新一期，歷史沒被驗過。** 這次的錯就是從這個縫隙
+  漏過去的。要嘛把恆等式擴到歷史全段，要嘛把跨期對帳排進固定節奏——目前選後者（手動），
+  但「手動」等於「會忘記」，值得再想。
+- 「僅選擇權」口徑仍無官方報告可對（CFTC 不發這份），只能靠內在檢查。

@@ -206,9 +206,14 @@ def test_pair_spec_points_at_real_series():
 def test_disagg_field_names_keep_cftc_typos():
     """CFTC 資料集本身的欄位拼字錯誤必須照抄，不可「順手修正」。
 
-    swap 的空方與價差是兩個底線、多方是一個；noncomm 的 spread 少一個 r。
-    這些若被改成看起來正確的名字，抓到的會是一整排 None，
+    swap 的空方與價差是兩個底線、多方是一個。改成看起來正確的名字會抓到一整排 None，
     而 validate.py 的恆等式檢查會因為分母也跟著少而**驗不出來**。
+
+    ⚠ 這種「把常數釘死」的測試只擋得住改動，擋不住一開始就選錯——
+    它的「應為 X」是抄自本站自己的選擇，不是外部真值。legacy 的 noncomm 價差欄
+    就是這樣：原本釘的是 noncomm_positions_spread，測試一直是綠的，
+    直到 2026-08-30 拿 CFTC 年度壓縮檔做跨期對帳才發現接錯（見下一個測試）。
+    真正的外部校驗在 scripts/reconcile_history.py，這裡只負責擋回退。
     """
     swap = next(c for c in cftc.DISAGG_CATEGORIES if c["key"] == "swap")
     check("swap 空方欄雙底線", swap["short"], "swap__positions_short_all")
@@ -218,8 +223,23 @@ def test_disagg_field_names_keep_cftc_typos():
     pm = next(c for c in cftc.DISAGG_CATEGORIES if c["key"] == "prod_merc")
     check("生產商沒有價差欄位", pm["spread"], None)
 
+
+def test_legacy_noncomm_spread_uses_all_not_old():
+    """Legacy 的非商業價差要取 All，不是 Old 作物年度。
+
+    這個資料集有兩個長得都像對的欄位：
+
+        noncomm_postions_spread_all  ← 要的「All」值（postions 少一個 i，CFTC 拼錯）
+        noncomm_positions_spread     ← 拼字正確，但裝的是 Old 作物年度的值
+
+    2000 年以後兩者幾乎完全相同，所以接錯的話近 26 年全對，只有 1986–1999 偏掉
+    （1987-09-15 長債：正確 14,390，錯的欄位 6,294）。恆等式抓不到——
+    validate.py 的 check_positions 只跑最新一期，歷史從來沒被恆等式驗過。
+    """
     noncomm = next(c for c in cftc.LEGACY_CATEGORIES if c["key"] == "noncomm")
-    check("noncomm 價差欄照抄 CFTC 拼字", noncomm["spread"], "noncomm_positions_spread")
+    check("noncomm 價差取 All 而非 Old", noncomm["spread"], "noncomm_postions_spread_all")
+    check("noncomm 價差不是拼字正確的那個",
+          noncomm["spread"] != "noncomm_positions_spread", True)
 
 
 def test_disagg_datasets_not_swapped():
@@ -326,7 +346,9 @@ if __name__ == "__main__":
                test_pair_series_inner_joins, test_pair_series_ratio_skips_bad_denominator,
                test_pair_series_spread_keeps_negative_wti, test_pair_series_rejects_unknown_op,
                test_pair_spec_points_at_real_series,
-               test_disagg_field_names_keep_cftc_typos, test_disagg_datasets_not_swapped,
+               test_disagg_field_names_keep_cftc_typos,
+               test_legacy_noncomm_spread_uses_all_not_old,
+               test_disagg_datasets_not_swapped,
                test_assets_are_self_consistent,
                test_next_release, test_normalise_sorts_by_date,
                test_subtract_gives_options_leg, test_subtract_drops_traders,
