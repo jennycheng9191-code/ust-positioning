@@ -326,7 +326,7 @@ def build() -> dict:
                 raise
             vols[key], price_dates[key], pairs[key] = fallback
             stale[key] = {"since": price_dates[key], "reason": str(e)[:300]}
-            print("  !! 價格來源失敗，沿用 %s 的舊值（黏燈）：%s"
+            print("  !! 價格來源失敗，沿用 %s 的舊值（黃燈）：%s"
                   % (price_dates[key], str(e)[:160]), file=sys.stderr)
 
     # 各分頁的報告日理論上相同（同一份 COT），但仍逐一記錄：
