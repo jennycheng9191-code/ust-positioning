@@ -286,7 +286,7 @@ function renderM4() {
     + lineChart(series, { fmt: v => v + (spec.kind === 'price' ? '%' : ' bp') })
     + legend(series)
     + `<div class="note" style="margin:10px 0 0">20 日滾動窗；60 日值列在上方數字後方供對照。
-       20 日明顯高於 60 日＝波動正在放大。資料涵蓋至 ${spec.date}。</div>`;
+       20 日明顯高於 60 日＝波動正在放大。資料涵蓋至 ${spec.date}。${staleNote(spec)}</div>`;
 }
 
 /* ── M5 配對（金銀比／Brent-WTI 價差） ────────────────── */
@@ -333,11 +333,23 @@ function renderM5() {
        ${switchHint}</div>`;
 }
 
+/* ── 黃燈標註 ───────────────────────────────────────── */
+// build.py 抓不到價格來源時會沿用前值並寫下 vol.stale，前端據此明說「這個數字
+// 是舊的」。靜默沿用舊值是最糟的失敗方式——讀者會把它當成今天的行情。
+// 部位資料不受影響：COT 來源另一條線，正常更新。
+function staleNote(spec) {
+  const st = spec && spec.stale;
+  if (!st) return '';
+  return ` <span style="color:var(--warn)">⚠ 價格來源目前抓不到，`
+    + `這條序列沿用 ${st.since} 的舊值，之後的行情尚未反映；`
+    + `部位資料不受影響。</span>`;
+}
+
 /* ── 頁尾來源 ───────────────────────────────────────── */
 function renderFooter() {
   const m = DATA.meta;
-  $('srcline').textContent = `本期部位為 ${m.report_date}（週二）收盤，於當週五 15:30 ET 公布；`
-    + `本頁的價格／殖利率資料涵蓋至 ${A().vol.date}。`;
+  $('srcline').innerHTML = `本期部位為 ${m.report_date}（週二）收盤，於當週五 15:30 ET 公布；`
+    + `本頁的價格／殖利率資料涵蓋至 ${A().vol.date}。${staleNote(A().vol)}`;
   $('srcnotes').innerHTML = A().source_note.map(t => `<div>${t}</div>`).join('');
 }
 

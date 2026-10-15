@@ -30,9 +30,22 @@ MAX_PRICE_AGE_DAYS = 10
 EXPECTED_BASES = {"combined", "futonly", "options"}
 
 
+WARNINGS: list[str] = []
+
+
 def fail(msg: str) -> None:
     print("✗ " + msg, file=sys.stderr)
     sys.exit(1)
+
+
+def warn(msg: str) -> None:
+    """黃燈：有問題但不擋產出。
+
+    用在「壞掉的部分是可以隔離的」場合——例如某條價格序列抓不到、build 已沿用
+    前值。擋下整份產出會連正常的 COT 部位一起停更，代價比標註更大。
+    """
+    WARNINGS.append(msg)
+    print("⚠ " + msg, file=sys.stderr)
 
 
 def check_positions(payload: dict) -> None:
@@ -123,9 +136,16 @@ def check_vol(payload: dict) -> None:
             fail(f"{a['key']} 的波動度缺少序列：{sorted(missing)}")
 
         age = (today - date.fromisoformat(a["vol"]["date"])).days
-        if age > MAX_PRICE_AGE_DAYS:
+        stale = (a["vol"] or {}).get("stale")
+        if age > MAX_PRICE_AGE_DAYS and not stale:
+            # 沒有 stale 標記卻過舊 = 來源靜默消失（build 以為抓到了，拿到的其實
+            # 是舊檔或空值）。這種才是真的壞了，照舊擋住不讓它上站。
             fail(f"{a['key']} 的價格／殖利率停在 {a['vol']['date']}（{age} 天前），"
                  f"門檻 {MAX_PRICE_AGE_DAYS} 天")
+        if stale:
+            # build 明確記錄了抓取失敗並沿用前值 → 黃燈放行。
+            warn(f"{a['key']} 的價格／殖利率沿用 {stale['since']} 的舊值"
+                 f"（{age} 天前）：{stale['reason'][:120]}")
 
         for key, s in vol.items():
             for w in ("rv20", "rv60"):
@@ -204,6 +224,12 @@ def main() -> None:
     check_positions(payload)
     check_vol(payload)
     check_history_files()
+
+    if WARNINGS:
+        print("", file=sys.stderr)
+        print(f"⚠ 通過，但有 {len(WARNINGS)} 項黃燈：", file=sys.stderr)
+        for w in WARNINGS:
+            print("  · " + w, file=sys.stderr)
 
 
 if __name__ == "__main__":

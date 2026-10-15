@@ -23,7 +23,7 @@ import cftc
 import derive
 import fred
 import prices
-from common import DATA, write_json
+from common import DATA, read_json, write_json
 
 TRAIL_WEEKS = 156      # 網頁軌跡保留三年
 VOL_DAYS = 780         # 波動度序列保留約三年交易日
@@ -282,8 +282,29 @@ def build_vol(asset_key: str) -> tuple[dict, str, dict]:
     return vol, max(v[-1][0] for v in raw.values()), pair
 
 
+def prev_vol_block(prev: dict | None, asset_key: str) -> tuple[dict, str, dict] | None:
+    """從上一版 latest.json 取某分頁的價格區塊，取不到就回 None。"""
+    if not prev:
+        return None
+    vol = (prev.get("vol") or {}).get(asset_key)
+    meta = next((a for a in prev.get("assets", []) if a.get("key") == asset_key), None)
+    if not vol or not meta:
+        return None
+    date_str = (meta.get("vol") or {}).get("date")
+    if not date_str:
+        return None
+    return vol, date_str, meta.get("pair")
+
+
 def build() -> dict:
     latest, trail, vols, price_dates, pairs = {}, {}, {}, {}, {}
+    stale = {}
+
+    # 上一版產出。價格來源掛掉時沿用它的價格區塊，讓 COT 部位照常更新——
+    # 2026-10 踩過：LBMA 把金銀價 JSON 移到 Cloudflare 後面並封鎖程式請求，
+    # build 在抓完所有 COT 之後才死在金價那一行，整批資料一次都沒寫進去，
+    # 網站的部位日期因此停在 9/22 連續三週，而壞掉的其實只有一條價格序列。
+    prev = read_json(DATA / "latest.json")
 
     for asset in cftc.ASSETS:
         print("【%s】" % asset["zh"])
@@ -292,8 +313,21 @@ def build() -> dict:
         print("  歷史檔 cot_history_%s.csv %s 列" % (asset["key"], f"{n:,}"))
 
         print("  抓取價格／殖利率…")
-        (vols[asset["key"]], price_dates[asset["key"]],
-         pairs[asset["key"]]) = build_vol(asset["key"])
+        key = asset["key"]
+        try:
+            vols[key], price_dates[key], pairs[key] = build_vol(key)
+        except Exception as e:  # noqa: BLE001
+            fallback = prev_vol_block(prev, key)
+            if fallback is None:
+                # 沒有前一版可退——這是第一次建置，硬退會產出一個沒有價格的站台，
+                # 那比失敗更糟（讀者看不出少了東西）。照舊讓它死。
+                print("  !! 價格來源失敗且無前一版可沿用：%s" % e,
+                      file=sys.stderr)
+                raise
+            vols[key], price_dates[key], pairs[key] = fallback
+            stale[key] = {"since": price_dates[key], "reason": str(e)[:300]}
+            print("  !! 價格來源失敗，沿用 %s 的舊值（黏燈）：%s"
+                  % (price_dates[key], str(e)[:160]), file=sys.stderr)
 
     # 各分頁的報告日理論上相同（同一份 COT），但仍逐一記錄：
     # CFTC 曾對個別合約補發修正，屆時分頁之間會短暫不同步，記下來才看得出來。
@@ -322,6 +356,10 @@ def build() -> dict:
                 **VOL_SPEC[a["key"]],
                 "plot": VOL_PLOT[a["key"]],
                 "date": price_dates[a["key"]],
+                # 價格來源抓失敗、沿用前值時才有這個鍵。validate.py 據此把
+                # 「明示過期」放行成黃燈，前端據此在頁尾與 M4 標註；
+                # 沒有這個鍵而日期又過舊，代表來源靜默消失，那仍要擋下來。
+                **({"stale": stale[a["key"]]} if a["key"] in stale else {}),
             },
             "source_note": SOURCE_NOTES[a["key"]],
         })
@@ -361,3 +399,7 @@ if __name__ == "__main__":
         print("建置失敗：%s" % e, file=sys.stderr)
         raise
     print("\n完成。報告日 %s，下期預定 %s" % (p["meta"]["report_date"], p["meta"]["next_release"]))
+    yellow = [a["zh"] for a in p["assets"] if (a.get("vol") or {}).get("stale")]
+    if yellow:
+        print("黃燈 %d 頁：%s 的價格沿用舊值，部位資料正常更新。"
+              % (len(yellow), "、".join(yellow)), file=sys.stderr)
