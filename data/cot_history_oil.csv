@@ -5304,6 +5304,11 @@ date,scheme,basis,contract,category,long,short,spread,net,net_chg,pctile,z,trade
 2026-10-06,disagg,combined,wti,m_money,198618,94127,431995,104491,-18425,22.0,-0.26,66,35,2533937
 2026-10-06,disagg,combined,wti,other_rept,154412,72657,587968,81755,14650,38.9,-0.4,91,35,2533937
 2026-10-06,disagg,combined,wti,nonrept,90271,59875,,30396,-6289,73.1,0.19,,,2533937
+2026-10-13,disagg,combined,wti,prod_merc,698656,333927,,364729,18391,98.9,1.52,65,62,2575891
+2026-10-13,disagg,combined,wti,swap,116508,703419,293954,-586911,-23930,6.4,-1.36,14,28,2575891
+2026-10-13,disagg,combined,wti,m_money,195537,92772,416452,102765,-1726,21.1,-0.28,68,33,2575891
+2026-10-13,disagg,combined,wti,other_rept,164867,72980,595938,91887,10132,44.8,-0.06,92,46,2575891
+2026-10-13,disagg,combined,wti,nonrept,93980,66449,,27531,-2865,67.8,-0.03,,,2575891
 2006-06-13,disagg,futonly,wti,prod_merc,258629,347756,,-89127,,,,58,68,1044276
 2006-06-13,disagg,futonly,wti,swap,156931,92458,181783,64473,,,,14,13,1044276
 2006-06-13,disagg,futonly,wti,m_money,105155,95457,123283,9698,,,,50,40,1044276
@@ -10609,6 +10614,11 @@ date,scheme,basis,contract,category,long,short,spread,net,net_chg,pctile,z,trade
 2026-10-06,disagg,futonly,wti,m_money,178353,124755,311571,53598,-25994,11.8,-0.84,60,29,1889422
 2026-10-06,disagg,futonly,wti,other_rept,158353,112891,269626,45462,15591,33.4,-0.75,63,33,1889422
 2026-10-06,disagg,futonly,wti,nonrept,77189,49791,,27398,-5757,73.4,0.25,,,1889422
+2026-10-13,disagg,futonly,wti,prod_merc,660971,307828,,353143,18133,98.9,1.47,60,56,1900179
+2026-10-13,disagg,futonly,wti,swap,126747,605225,140911,-478478,-17010,11.2,-0.9,12,30,1900179
+2026-10-13,disagg,futonly,wti,m_money,171973,131399,286687,40574,-13024,8.1,-1.03,58,30,1900179
+2026-10-13,disagg,futonly,wti,other_rept,172680,112911,260071,59769,14307,39.7,-0.25,66,41,1900179
+2026-10-13,disagg,futonly,wti,nonrept,80139,55147,,24992,-2406,68.8,0.05,,,1900179
 2006-06-13,disagg,options,wti,prod_merc,105229,108212,,-2983,,,,,,652896
 2006-06-13,disagg,options,wti,swap,-11333,908,233190,-12241,,,,,,652896
 2006-06-13,disagg,options,wti,m_money,16210,-4450,72467,20660,,,,,,652896
@@ -15914,6 +15924,11 @@ date,scheme,basis,contract,category,long,short,spread,net,net_chg,pctile,z,trade
 2026-10-06,disagg,options,wti,m_money,20265,-30628,120424,50893,7569,98.0,2.45,,,644515
 2026-10-06,disagg,options,wti,other_rept,-3941,-40234,318342,36293,-941,61.0,0.51,,,644515
 2026-10-06,disagg,options,wti,nonrept,13082,10084,,2998,-532,66.5,-0.21,,,644515
+2026-10-13,disagg,options,wti,prod_merc,37685,26099,,11586,258,50.4,-0.31,,,675712
+2026-10-13,disagg,options,wti,swap,-10239,98194,153043,-108433,-6920,2.8,-2.18,,,675712
+2026-10-13,disagg,options,wti,m_money,23564,-38627,129765,62191,11298,99.3,3.08,,,675712
+2026-10-13,disagg,options,wti,other_rept,-7813,-39931,335867,32118,-4175,51.8,0.29,,,675712
+2026-10-13,disagg,options,wti,nonrept,13841,11302,,2539,-459,62.7,-0.43,,,675712
 1995-03-21,legacy,combined,wti,noncomm,41647,5014,27941,36633,,,,38,13,391567
 1995-03-21,legacy,combined,wti,comm,247109,294301,,-47192,,,,67,83,391567
 1995-03-21,legacy,combined,wti,nonrept,74870,64311,,10559,,,,,,391567
@@ -20801,6 +20816,9 @@ date,scheme,basis,contract,category,long,short,spread,net,net_chg,pctile,z,trade
 2026-10-06,legacy,combined,wti,noncomm,353030,166784,1019962,186246,-3776,51.4,-0.51,157,70,2533937
 2026-10-06,legacy,combined,wti,comm,1070674,1287317,,-216643,10064,47.4,0.42,102,99,2533937
 2026-10-06,legacy,combined,wti,nonrept,90271,59875,,30396,-6289,82.0,0.19,,,2533937
+2026-10-13,legacy,combined,wti,noncomm,360404,165752,1012390,194652,8406,52.6,-0.35,160,79,2575891
+2026-10-13,legacy,combined,wti,comm,1109117,1331300,,-222183,-5540,46.2,0.32,102,102,2575891
+2026-10-13,legacy,combined,wti,nonrept,93980,66449,,27531,-2865,78.1,-0.03,,,2575891
 1986-01-15,legacy,futonly,wti,noncomm,2560,11594,5317,-9034,,,,20,53,74334
 1986-01-15,legacy,futonly,wti,comm,53426,42097,,11329,,,,74,70,74334
 1986-01-15,legacy,futonly,wti,nonrept,13031,15326,,-2295,,,,,,74334
@@ -26609,6 +26627,9 @@ date,scheme,basis,contract,category,long,short,spread,net,net_chg,pctile,z,trade
 2026-10-06,legacy,futonly,wti,noncomm,336706,237646,581197,99060,-10403,56.8,-1.15,123,62,1889422
 2026-10-06,legacy,futonly,wti,comm,894330,1020788,,-126458,16160,42.2,1.03,95,93,1889422
 2026-10-06,legacy,futonly,wti,nonrept,77189,49791,,27398,-5757,84.6,0.25,,,1889422
+2026-10-13,legacy,futonly,wti,noncomm,344653,244310,546758,100343,1283,57.0,-1.12,124,71,1900179
+2026-10-13,legacy,futonly,wti,comm,928629,1053964,,-125335,1123,42.3,1.04,95,95,1900179
+2026-10-13,legacy,futonly,wti,nonrept,80139,55147,,24992,-2406,81.7,0.05,,,1900179
 1995-03-21,legacy,options,wti,noncomm,3531,1928,12602,1603,,,,,,58202
 1995-03-21,legacy,options,wti,comm,42949,44251,,-1302,,,,,,58202
 1995-03-21,legacy,options,wti,nonrept,-880,-579,,-301,,,,,,58202
@@ -31496,3 +31517,6 @@ date,scheme,basis,contract,category,long,short,spread,net,net_chg,pctile,z,trade
 2026-10-06,legacy,options,wti,noncomm,16324,-70862,438765,87186,6627,97.3,1.92,,,644515
 2026-10-06,legacy,options,wti,comm,176344,266529,,-90185,-6096,2.1,-1.85,,,644515
 2026-10-06,legacy,options,wti,nonrept,13082,10084,,2998,-532,68.7,-0.21,,,644515
+2026-10-13,legacy,options,wti,noncomm,15751,-78558,465632,94309,7123,98.9,2.17,,,675712
+2026-10-13,legacy,options,wti,comm,180488,277336,,-96848,-6663,1.2,-2.07,,,675712
+2026-10-13,legacy,options,wti,nonrept,13841,11302,,2539,-459,64.6,-0.43,,,675712
